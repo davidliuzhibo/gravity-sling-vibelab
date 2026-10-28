@@ -1,0 +1,342 @@
+package com.vrgames.gravitysling.render
+
+import com.pico.spatial.core.ecs.Entity
+import com.pico.spatial.core.ecs.LoadType
+import com.pico.spatial.core.ecs.ModelComponent
+import com.pico.spatial.core.ecs.TransformComponent
+import com.pico.spatial.core.ecs.resource.BlendingMode
+import com.pico.spatial.core.ecs.resource.MaterialCullingMode
+import com.pico.spatial.core.ecs.resource.MeshResource
+import com.pico.spatial.core.ecs.resource.PhysicallyBasedMaterial
+import com.pico.spatial.core.ecs.resource.TextureColorSpace
+import com.pico.spatial.core.ecs.resource.TextureCreateOption
+import com.pico.spatial.core.ecs.resource.TextureEncoding
+import com.pico.spatial.core.ecs.resource.TextureResource
+import com.pico.spatial.core.ecs.resource.UnlitMaterial
+import com.pico.spatial.core.math.EulerAngles
+import com.pico.spatial.core.math.Vector3
+import com.vrgames.gravitysling.core.BodyKind
+import com.vrgames.gravitysling.core.BodySpec
+
+/**
+ * Shared meshes, materials, textures and AI-generated model templates. Created once on the
+ * stage's first frame; level rebuilds reuse them. Everything shared is marked [shared]: the SDK
+ * releases a resource together with the entity that owns it, and a level rebuild destroys the
+ * previous level's entities.
+ */
+class Assets {
+    val unitSphere: MeshResource = MeshResource.createSphere(1f).shared()
+    val dotMesh: MeshResource = MeshResource.createSphere(0.006f).shared()
+    val bandMesh: MeshResource = MeshResource.createCylinder(1f, 0.0035f).shared()
+    val launcherMesh: MeshResource = MeshResource.createTorus(0.1f, 0.088f).shared()
+
+    val aimMaterial = unlit(color(0.45f, 0.9f, 1f)).shared()
+    val trailMaterial = unlit(color(1f, 0.62f, 0.25f)).shared()
+    val hintMaterial = unlit(color(1f, 0.85f, 0.3f, 0.55f), BlendingMode.TRANSPARENT).shared()
+    val bandMaterial = unlit(color(1f, 0.78f, 0.35f)).shared()
+    val launcherMaterial = pbr(color(0.25f, 0.8f, 0.85f), metallic = 0.8f, roughness = 0.3f, emissive = color(0.05f, 0.35f, 0.4f)).shared()
+    // The goal zone glows at its edge only, so the station inside stays clear.
+    val goalMaterial = rim(color(0.35f, 0.95f, 1f, 0.45f)).shared()
+    val goalLockedMaterial = rim(color(0.6f, 0.6f, 0.65f, 0.2f)).shared()
+    val checkpointMaterial = pbr(color(0.2f, 0.8f, 1f), roughness = 0.3f, emissive = color(0.1f, 0.6f, 0.9f)).shared()
+    val checkpointDoneMaterial = pbr(color(0.3f, 1f, 0.5f), roughness = 0.3f, emissive = color(0.15f, 0.8f, 0.3f)).shared()
+    val ghostMaterial = unlit(color(0.75f, 0.45f, 1f, 0.28f), BlendingMode.TRANSPARENT).shared()
+    val ghostProbeMaterial = unlit(color(0.55f, 0.95f, 1f, 0.35f), BlendingMode.TRANSPARENT).shared()
+    /** "If you burn now" line during a flight, and the station's orbit when it moves. */
+    val burnMaterial = unlit(color(1f, 0.55f, 0.2f, 0.85f), BlendingMode.TRANSPARENT).shared()
+    val orbitMaterial = unlit(color(0.4f, 0.9f, 1f, 0.3f), BlendingMode.TRANSPARENT).shared()
+
+    // Star map (level select): locked / open / cleared stars, earned-star pips, badges, links.
+    val mapLocked = unlit(color(0.32f, 0.34f, 0.4f)).shared()
+    val mapOpen = glow(color(0.45f, 0.95f, 1f)).shared()
+    val mapOpenHalo = rim(color(0.45f, 0.95f, 1f, 0.5f)).shared()
+    val mapCleared = pbr(color(1f, 0.82f, 0.3f), metallic = 0.6f, roughness = 0.25f, emissive = color(1f, 0.7f, 0.2f)).shared()
+    val mapChallenge = pbr(color(0.85f, 0.45f, 1f), metallic = 0.5f, roughness = 0.25f, emissive = color(0.6f, 0.25f, 0.95f)).shared()
+    val mapPipOn = glow(color(1f, 0.8f, 0.3f)).shared()
+    val mapPipOff = unlit(color(0.25f, 0.27f, 0.32f)).shared()
+    val mapBadge = glow(color(0.8f, 0.5f, 1f, 0.9f)).shared()
+    val mapCurrent = unlit(color(1f, 1f, 1f, 0.7f), BlendingMode.TRANSPARENT).shared()
+    val mapLink = unlit(color(0.45f, 0.65f, 0.9f, 0.3f), BlendingMode.TRANSPARENT).shared()
+    val mapLinkDone = unlit(color(1f, 0.8f, 0.35f, 0.55f), BlendingMode.TRANSPARENT).shared()
+    val mapRing: MeshResource = MeshResource.createTorus(0.026f, 0.023f).shared()
+    val mapBadgeRing: MeshResource = MeshResource.createTorus(0.021f, 0.018f).shared()
+    val mapDiamond: MeshResource = MeshResource.createBox(Vector3(0.022f, 0.022f, 0.022f)).shared()
+
+    val confettiMesh: MeshResource = MeshResource.createBox(Vector3(0.012f, 0.012f, 0.003f)).shared()
+    val confettiMaterial = pbr(color(1f, 0.8f, 0.3f), metallic = 0.7f, roughness = 0.3f, emissive = color(0.8f, 0.55f, 0.1f)).shared()
+    private val starCore = pbr(color(1f, 0.82f, 0.3f), metallic = 0.6f, roughness = 0.25f, emissive = color(1f, 0.7f, 0.2f)).shared()
+    private val starRingMat = unlit(color(1f, 0.9f, 0.55f, 0.7f), BlendingMode.TRANSPARENT).shared()
+    private val starRing = MeshResource.createTorus(0.03f, 0.027f).shared()
+    private val ballCore = pbr(color(0.55f, 0.3f, 1f), roughness = 0.2f, emissive = color(0.45f, 0.2f, 0.95f)).shared()
+    private val ballHalo = glow(color(0.6f, 0.4f, 1f, 0.12f)).shared()
+    private val rockMat by lazy {
+        pbr(color(0.62f, 0.56f, 0.5f), roughness = 0.95f).apply { setBaseColorTexture(texture("textures/moon.jpg")) }.shared()
+    }
+
+    /**
+     * Decoded textures by asset path. [loadTextures] fills it off the main thread at startup (a
+     * 4K sky decoded on the main thread stalls the app long enough for the system to flag it);
+     * anything missing is loaded on demand.
+     */
+    private val textures = java.util.concurrent.ConcurrentHashMap<String, TextureResource>()
+
+    /** Call from a background dispatcher, before the first level is built. */
+    fun loadTextures() {
+        ChapterLook.all.forEach { texture(it.sky) }
+        for (p in listOf("earth", "mars", "jupiter", "moon")) texture("textures/$p.jpg")
+        normalMaps.values.forEach(::texture)
+    }
+
+    private fun texture(path: String): TextureResource = textures.getOrPut(path) {
+        val normal = path in normalMaps.values
+        TextureResource.load(
+            path,
+            LoadType.FROM_ASSETS,
+            TextureCreateOption().apply {
+                if (normal) {
+                    colorSpace = TextureColorSpace.RAW
+                    textureEncoding = TextureEncoding.LINEAR
+                }
+            },
+        ).shared()
+    }
+
+    // Atmospheres and halos: additive back-face shells (see [rim]), inner layers brighter.
+    private val earthRims = listOf(rim(color(0.45f, 0.75f, 1f, 0.55f)), rim(color(0.35f, 0.6f, 1f, 0.25f)), rim(color(0.3f, 0.5f, 1f, 0.1f))).map { it.shared() }
+    private val marsRims = listOf(rim(color(1f, 0.6f, 0.4f, 0.3f)), rim(color(1f, 0.55f, 0.35f, 0.1f))).map { it.shared() }
+    private val jupiterRims = listOf(rim(color(1f, 0.85f, 0.6f, 0.22f)), rim(color(1f, 0.8f, 0.55f, 0.08f))).map { it.shared() }
+    private val ballRims = listOf(rim(color(0.7f, 0.45f, 1f, 0.5f)), rim(color(0.6f, 0.35f, 1f, 0.2f))).map { it.shared() }
+    private val starHalo = rim(color(1f, 0.8f, 0.35f, 0.35f)).shared()
+    private val beadMaterial = glow(color(0.5f, 0.95f, 1f, 0.9f)).shared()
+    private val goldBead = glow(color(1f, 0.8f, 0.35f, 0.9f)).shared()
+    private val violetBead = glow(color(0.75f, 0.45f, 1f, 0.9f)).shared()
+
+    // Particles. Instances are scaled to the particle radius in meters.
+    val sparkGold = glow(color(1f, 0.78f, 0.3f)).shared()
+    val sparkFire = glow(color(1f, 0.5f, 0.15f)).shared()
+    val sparkCyan = glow(color(0.4f, 0.95f, 1f)).shared()
+    val sparkViolet = glow(color(0.75f, 0.45f, 1f)).shared()
+    val exhaustMaterial = glow(color(0.55f, 0.85f, 1f, 0.8f)).shared()
+    val dustMesh: MeshResource = MeshResource.createSphere(0.003f).shared()
+    val dustMaterial = glow(color(0.7f, 0.8f, 1f, 0.6f)).shared()
+    val flashMaterial = glow(color(1f, 0.6f, 0.25f, 0.8f)).shared()
+    private val boosterMesh = MeshResource.createTorus(0.07f, 0.058f).shared()
+    val boosterMaterial = pbr(color(1f, 0.75f, 0.2f), metallic = 0.9f, roughness = 0.2f, emissive = color(0.9f, 0.55f, 0.1f)).shared()
+    private val boosterUsedMat = pbr(color(0.5f, 0.45f, 0.35f), metallic = 0.6f, roughness = 0.5f).shared()
+    private val boosterCoreMat = unlit(color(1f, 0.8f, 0.3f, 0.14f), BlendingMode.TRANSPARENT).shared()
+    private val portalInMat = unlit(color(0.7f, 0.35f, 1f, 0.35f), BlendingMode.TRANSPARENT).shared()
+    private val portalOutMat = unlit(color(0.35f, 0.9f, 1f, 0.3f), BlendingMode.TRANSPARENT).shared()
+    private val portalRingMat = pbr(color(0.6f, 0.3f, 1f), roughness = 0.2f, emissive = color(0.5f, 0.2f, 0.9f)).shared()
+    private val portalOutRingMat = pbr(color(0.3f, 0.85f, 1f), roughness = 0.2f, emissive = color(0.15f, 0.6f, 0.9f)).shared()
+
+    /** Textured planet materials, loaded on first use and cached. */
+    private val bodyMats = HashMap<String, PhysicallyBasedMaterial>()
+
+    private fun bodyMaterial(look: String): PhysicallyBasedMaterial = bodyMats.getOrPut(look) {
+        // Small moons reuse the lunar texture with a tint.
+        val (tex, tint, rough) = when (look) {
+            "earth" -> Triple("earth", color(1f, 1f, 1f), 0.8f)
+            "mars" -> Triple("mars", color(1f, 1f, 1f), 0.9f)
+            "jupiter" -> Triple("jupiter", color(1f, 1f, 1f), 0.7f)
+            "phobos", "deimos" -> Triple("moon", color(0.75f, 0.6f, 0.5f), 0.95f)
+            "io" -> Triple("moon", color(1f, 0.9f, 0.45f), 0.9f)
+            "europa" -> Triple("moon", color(0.95f, 0.9f, 0.8f), 0.6f)
+            "ganymede" -> Triple("moon", color(0.75f, 0.7f, 0.65f), 0.9f)
+            else -> Triple("moon", color(1f, 1f, 1f), 0.95f)
+        }
+        pbr(tint, roughness = rough).apply {
+            setBaseColorTexture(texture("textures/$tex.jpg"))
+            normalMaps[tex]?.let { setNormalTexture(texture(it)); setNormalScale(1f) }
+        }.shared()
+    }
+
+    /** Debug: relief strength of every textured body that has a normal map. */
+    fun setNormalScale(s: Float) {
+        bodyMats.values.forEach { if (it.getNormalTexture() != null) it.setNormalScale(s) }
+    }
+
+    /** Relief for the rocky bodies, derived from their textures (tools/normal_from_height.py). */
+    private val normalMaps = mapOf("moon" to "textures/moon_n.png", "mars" to "textures/mars_n.png")
+
+    /**
+     * Unit sphere (tools/make_sphere.py) for bodies with a normal map. On the built-in sphere the
+     * moon and Mars textures came out smeared into streaks; this one maps them cleanly and carries
+     * tangents for the relief. [tangentSphere] is a debug switch (takes effect on the next level).
+     */
+    var sphereTemplate: Entity? = null
+        set(v) { field = v?.also(::shareResources) }
+    var tangentSphere = true
+
+    /** A unit sphere in the body's material, with tangents when its material has a normal map. */
+    private fun bodySphere(look: String): Entity {
+        val m = bodyMaterial(look)
+        val template = sphereTemplate?.takeIf { tangentSphere && m.getNormalTexture() != null }
+        return template?.clone(Entity.CloneOptions(true, true))?.also { setMaterials(it, m) } ?: model(unitSphere, m)
+    }
+
+    /** Irregular asteroid shapes (tools/make_rocks.py); spheres stand in until they load. */
+    var rockTemplates: List<Entity> = emptyList()
+        set(v) { field = v.onEach(::shareResources) }
+
+    /**
+     * Loaded asynchronously; null until ready (primitives are used meanwhile). Clones share the
+     * template's meshes and materials, so those are made app-owned too.
+     */
+    var probeTemplate: Entity? = null
+        set(v) { field = v?.also(::shareResources) }
+    var stationTemplate: Entity? = null
+        set(v) { field = v?.also(::shareResources) }
+
+    private fun shareResources(e: Entity) {
+        e.components[ModelComponent::class.java]?.let { m ->
+            m.mesh?.shared()
+            m.materials?.forEach { it.shared() }
+        }
+        e.getChildren().forEach(::shareResources)
+    }
+
+    fun newBodyVisual(b: BodySpec): Entity {
+        val r = b.radius.toFloat()
+        return when (b.kind) {
+            BodyKind.PLANET, BodyKind.STAR -> Entity().apply {
+                addChild(bodySphere(b.look).apply { setScale(r) })
+                val rims = when (b.look) {
+                    "earth" -> earthRims
+                    "mars" -> marsRims
+                    "jupiter" -> jupiterRims
+                    else -> emptyList()
+                }
+                rims.forEachIndexed { i, m -> addChild(model(unitSphere, m).apply { setScale(r * (1.025f + 0.04f * i)) }) }
+            }
+            BodyKind.MOON -> bodySphere(b.look).apply { setScale(r) }
+            BodyKind.GRAVITY_BALL -> Entity().apply {
+                addChild(model(unitSphere, ballCore).apply { setScale(r * 0.7f) })
+                addChild(model(unitSphere, ballHalo).apply { setScale(r * 1.6f) })
+                ballRims.forEachIndexed { i, m -> addChild(model(unitSphere, m).apply { setScale(r * (0.8f + 0.25f * i)) }) }
+            }
+            BodyKind.ASTEROID -> newRock(b.id, r)
+        }
+    }
+
+    private fun newRock(id: String, r: Float): Entity {
+        val h = id.hashCode() and 0x7fffffff
+        val template = rockTemplates.getOrNull(h % rockTemplates.size.coerceAtLeast(1))
+        val rock = template?.clone(Entity.CloneOptions(true, true))?.also { setMaterials(it, rockMat) }
+            ?: return model(unitSphere, rockMat).apply { transform().setScaleVector(Vector3(r * 1.2f, r * 0.85f, r)) }
+        return rock.apply {
+            setScale(r * 2.3f)
+            transform().eulerAngles = EulerAngles((h % 360).toFloat(), (h / 360 % 360).toFloat(), 0f)
+        }
+    }
+
+    private fun setMaterials(e: Entity, m: com.pico.spatial.core.ecs.resource.Material) {
+        e.components[ModelComponent::class.java]?.materials?.let { mats -> for (i in 0 until mats.size) mats[i] = m }
+        e.getChildren().forEach { setMaterials(it, m) }
+    }
+
+    /** A few glowing beads on a circle; spinning their parent makes a smooth ring visibly turn. */
+    private fun beads(radius: Float, count: Int, size: Float, material: com.pico.spatial.core.ecs.resource.Material) = Entity().apply {
+        for (i in 0 until count) {
+            val a = i * 2 * Math.PI / count
+            addChild(model(unitSphere, material).apply {
+                setScale(size)
+                setPos(Vector3((radius * kotlin.math.cos(a)).toFloat(), 0f, (radius * kotlin.math.sin(a)).toFloat()))
+            })
+        }
+    }
+
+    /** Launcher dock: the ring plus a turning bead ring (child 1, spun by the playfield). */
+    fun newLauncher(): Entity = Entity().apply {
+        addChild(model(launcherMesh, launcherMaterial))
+        addChild(beads(0.094f, 6, 0.007f, beadMaterial))
+    }
+
+    /** Golden ring with a faint core; the ring axis is set by the caller. */
+    fun newBooster(): Entity = Entity().apply {
+        addChild(model(boosterMesh, boosterMaterial))
+        addChild(model(unitSphere, boosterCoreMat).apply { setScale(0.055f) })
+        addChild(beads(0.064f, 4, 0.008f, goldBead))
+    }
+
+    fun boosterUsed(e: Entity) {
+        e.getChildren().firstOrNull()?.components?.get(com.pico.spatial.core.ecs.ModelComponent::class.java)?.materials?.set(0, boosterUsedMat)
+    }
+
+    /** Wormhole mouth: glowing ring around a translucent disk-like sphere. */
+    fun newPortal(radius: Float, entry: Boolean): Entity = Entity().apply {
+        addChild(model(MeshResource.createTorus(radius, radius - 0.012f), if (entry) portalRingMat else portalOutRingMat))
+        addChild(model(unitSphere, if (entry) portalInMat else portalOutMat).apply {
+            transform().setScaleVector(Vector3(radius * 0.92f, radius * 0.25f, radius * 0.92f))
+        })
+        addChild(beads(radius * 0.7f, 6, 0.008f, if (entry) violetBead else beadMaterial))
+    }
+
+    /** 3D model shown on an encyclopedia card. */
+    fun newCodexModel(key: String): Entity? = when (key) {
+        "probe" -> newProbeVisual().apply { setScale(3.2f) }
+        "station" -> newStationVisual(0.28f)
+        "booster" -> newBooster().apply { setScale(2.2f); transform().eulerAngles = EulerAngles(70f, 0f, 0f) }
+        "wormhole" -> newPortal(0.12f, true).apply { transform().eulerAngles = EulerAngles(70f, 0f, 0f) }
+        "asteroid" -> newBodyVisual(BodySpec("a", "", BodyKind.ASTEROID, com.vrgames.gravitysling.core.Vec3.ZERO, 0.09, 0.0))
+        "gravity_ball" -> newBodyVisual(BodySpec("b", "", BodyKind.GRAVITY_BALL, com.vrgames.gravitysling.core.Vec3.ZERO, 0.1, 0.0))
+        "earth", "mars", "jupiter" -> newBodyVisual(BodySpec(key, "", BodyKind.PLANET, com.vrgames.gravitysling.core.Vec3.ZERO, 0.13, 0.0, look = key))
+        else -> newBodyVisual(BodySpec(key, "", BodyKind.MOON, com.vrgames.gravitysling.core.Vec3.ZERO, 0.12, 0.0, look = key))
+    }
+
+    fun newStar(): Entity = Entity().apply {
+        addChild(model(unitSphere, starCore).apply { setScale(0.016f) })
+        addChild(model(starRing, starRingMat).apply { transform().eulerAngles = EulerAngles(70f, 0f, 0f) })
+        addChild(model(unitSphere, starHalo).apply { setScale(0.03f) })
+    }
+
+    fun newProbeVisual(): Entity {
+        probeTemplate?.clone(Entity.CloneOptions(true, true))?.let { return it }
+        // Primitive stand-in: white body, orange band, blue panels.
+        return Entity().apply {
+            addChild(model(unitSphere, pbr(color(0.95f, 0.95f, 0.97f), roughness = 0.35f)).apply { setScale(0.03f) })
+            addChild(model(MeshResource.createTorus(0.032f, 0.026f), pbr(color(1f, 0.55f, 0.15f), roughness = 0.4f)).apply {
+                transform().eulerAngles = EulerAngles(90f, 0f, 0f)
+            })
+            val panel = pbr(color(0.15f, 0.3f, 0.85f), metallic = 0.5f, roughness = 0.3f).shared()
+            addChild(model(MeshResource.createBox(Vector3(0.05f, 0.002f, 0.025f)), panel).apply { setPos(Vector3(-0.058f, 0f, 0f)) })
+            addChild(model(MeshResource.createBox(Vector3(0.05f, 0.002f, 0.025f)), panel).apply { setPos(Vector3(0.058f, 0f, 0f)) })
+        }
+    }
+
+    fun newStationVisual(size: Float): Entity {
+        stationTemplate?.clone(Entity.CloneOptions(true, true))?.let { return it.apply { setScale(size) } }
+        return Entity().apply {
+            addChild(model(MeshResource.createTorus(size * 0.5f, size * 0.4f), pbr(color(0.92f, 0.95f, 0.97f), metallic = 0.3f, roughness = 0.4f)))
+            addChild(model(unitSphere, pbr(color(0.3f, 0.9f, 0.9f), emissive = color(0.1f, 0.6f, 0.6f))).apply { setScale(size * 0.15f) })
+        }
+    }
+
+    private val skyMaterials = HashMap<String, com.pico.spatial.core.ecs.resource.Material>()
+
+    private fun skyMaterial(path: String) = skyMaterials.getOrPut(path) {
+        UnlitMaterial.create().apply {
+            setBaseColorTexture(texture(path))
+            setCullingMode(MaterialCullingMode.FRONT)
+        }.shared()
+    }
+
+    /** Inside-out sphere with the first chapter's panorama (the Milky Way). */
+    fun newSky(): Entity = model(MeshResource.createSphere(40f), skyMaterial(ChapterLook.of(1).sky))
+
+    /** Swaps the panorama on a sphere made by [newSky]. */
+    fun setSky(sky: Entity, look: ChapterLook) = setMaterials(sky, skyMaterial(look.sky))
+
+    companion object {
+        /** Scales a loaded model so its longest side is [size] meters and centers it. */
+        fun normalize(model: Entity, size: Float): Entity {
+            val b = model.getVisualBounds(null, recursive = true, enabledOnly = false)
+            val longest = maxOf(b.size.x, b.size.y, b.size.z).coerceAtLeast(1e-4f)
+            val s = size / longest
+            model.components[TransformComponent::class.java]?.apply {
+                scaleVector = Vector3(s)
+                setPosition(Vector3(-b.center.x * s, -b.center.y * s, -b.center.z * s))
+            }
+            return Entity().apply { addChild(model) }
+        }
+    }
+}
