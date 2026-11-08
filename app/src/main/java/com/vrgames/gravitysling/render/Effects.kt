@@ -21,9 +21,10 @@ import kotlin.math.sqrt
  */
 class Sparks(private val name: String, private val capacity: Int, mesh: MeshResource, material: Material) {
     val entity: Entity = ModelEntity(mesh, material)
+    private val ids = Array(capacity) { "$name$it" }
     private val instances = MeshInstancesResource.create(
         name,
-        (0 until capacity).map { MeshInstancesResource.Instance("$name$it", HIDDEN) },
+        ids.map { MeshInstancesResource.Instance(it, HIDDEN) },
     )
     private val px = DoubleArray(capacity)
     private val py = DoubleArray(capacity)
@@ -81,21 +82,21 @@ class Sparks(private val name: String, private val capacity: Int, mesh: MeshReso
             if (age[i] >= life[i]) {
                 age[i] = -1.0
                 live--
-                instances.update("$name$i", HIDDEN)
+                instances.update(ids[i], HIDDEN)
                 continue
             }
             vx[i] *= k; vy[i] *= k; vz[i] *= k
             px[i] += vx[i] * dt; py[i] += vy[i] * dt; pz[i] += vz[i] * dt
             val s = size[i] * (1 - age[i] / life[i]).toFloat()
             instances.update(
-                "$name$i",
+                ids[i],
                 Transform(Vector3(px[i].toFloat(), py[i].toFloat(), pz[i].toFloat()), NO_ROTATION, Vector3(s)),
             )
         }
     }
 
     fun clear() {
-        for (i in 0 until capacity) if (age[i] >= 0) { age[i] = -1.0; instances.update("$name$i", HIDDEN) }
+        for (i in 0 until capacity) if (age[i] >= 0) { age[i] = -1.0; instances.update(ids[i], HIDDEN) }
         live = 0
     }
 

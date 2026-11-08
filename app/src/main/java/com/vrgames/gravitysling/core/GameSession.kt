@@ -59,6 +59,39 @@ class Progress(
 
 enum class Phase { AIMING, FLYING, RESULT }
 
+/** How a failed flight went wrong: how close it came to the goal and on which side, from the player's seat. */
+data class MissReport(val status: FlightStatus, val closest: Double, val offset: Vec3) {
+    /** One line a player can act on: how far, which way, and what to change. */
+    fun describe(goalRadius: Double): String {
+        val gap = ((closest - goalRadius).coerceAtLeast(0.0) * 100).toInt()
+        val side = buildList {
+            if (kotlin.math.abs(offset.x) >= .03) add(if (offset.x > 0) "右边" else "左边")
+            if (kotlin.math.abs(offset.y) >= .03) add(if (offset.y > 0) "上方" else "下方")
+            if (kotlin.math.abs(offset.z) >= .05) add(if (offset.z > 0) "近处" else "远处")
+        }
+        val where = if (side.isEmpty()) "旁边" else side.joinToString("偏")
+        val fix = buildList {
+            // A pull sends the probe the opposite way, so the hand moves towards the side it missed on.
+            if (kotlin.math.abs(offset.x) >= .03) add(if (offset.x > 0) "手再往右拉一点" else "手再往左拉一点")
+            if (kotlin.math.abs(offset.y) >= .03) add(if (offset.y > 0) "手再往上抬一点" else "手再往下压一点")
+        }.joinToString("，")
+        val head = when (status) {
+            FlightStatus.CRASHED -> "撞上天体了，离空间站还差 $gap 厘米。"
+            FlightStatus.TIMEOUT -> "飞得太久，包裹超时了。最近时差 $gap 厘米，在空间站${where}。"
+            else -> "飞出投递区了。最近时差 $gap 厘米，从空间站${where}飞过。"
+        }
+        return head + if (fix.isEmpty()) "拉得再用力一点试试。" else "下次$fix。"
+    }
+}
+
+/** Snapshot of everything the aim line depends on; computed off the render thread. */
+class AimRequest(val level: Level, val pull: Vec3, val placements: Map<String, Vec3>, val sampleEvery: Int, val maxTime: Double) {
+    fun run(): AimResult = simulate(level, pull, placements, sampleEvery = sampleEvery, maxTime = maxTime).let {
+        AimResult(it.path, it.status == FlightStatus.SUCCESS)
+    }
+}
+class AimResult(val path: List<Vec3>, val delivers: Boolean)
+
 /**
  * Game rules independent of rendering: aiming, placement, live flight and scoring.
  * The renderer reads positions from here every frame and forwards input to it.
@@ -91,6 +124,16 @@ class GameSession(val progress: Progress = Progress()) {
     var burnCue: Double? = null; private set
     /** The player (not a test replay) fired the engine on this flight. */
     var playerBurned = false; private set
+    /** Why the last flight failed, for the card in front of the player. */
+    var lastMiss: MissReport? = null; private set
+    /** Failed flights on this level since it was loaded. */
+    var failsOnLevel = 0; private set
+    /** Aim assist: a gold marker shows a pull that delivers, and a pull near it locks on. */
+    var aimAssist = false; private set
+    /** Bumps whenever the aim line must be recomputed. */
+    var aimVersion = 0; private set
+    private var closest = Double.MAX_VALUE
+    private var closestOffset = Vec3.ZERO
 
     private var accumulator = 0.0
     private val stepEvents = ArrayList<FlightEvent>(4)
@@ -106,6 +149,9 @@ class GameSession(val progress: Progress = Progress()) {
         attempts = 0
         showHint = false
         hintCache = null
+        failsOnLevel = 0
+        aimAssist = false
+        lastMiss = null
         reset()
     }
 
@@ -124,6 +170,7 @@ class GameSession(val progress: Progress = Progress()) {
         burnRequested = false
         burnCue = null
         playerBurned = false
+        aimVersion++
     }
 
     fun nextLevel(): Level? {
@@ -134,8 +181,34 @@ class GameSession(val progress: Progress = Progress()) {
     // ---- Aiming --------------------------------------------------------------------------------
     fun setPull(p: Vec3) {
         if (phase != Phase.AIMING) return
-        pull = p.clampLength(level.maxPull)
+        var next = p.clampLength(level.maxPull)
+        assistPull?.let { if (next.distanceTo(it) <= ASSIST_LOCK) next = it }
+        pull = next
         previewCache = null
+        aimVersion++
+    }
+
+    /** The pull the assist marker shows, or null while it is off. */
+    val assistPull: Vec3? get() = if (aimAssist) level.solution?.pull else null
+
+    /** The assist is offered after repeated misses, on levels with a known solution. */
+    val assistOffered get() = failsOnLevel >= ASSIST_AFTER_FAILS && level.solution != null && !aimAssist && !blind
+
+    /** Turns the assist on and puts the gravity balls where the known solution needs them. */
+    fun enableAssist() {
+        val s = level.solution ?: return
+        if (phase != Phase.AIMING) reset()
+        s.placements.forEach { (id, p) -> placements[id] = p }
+        aimAssist = true
+        previewCache = null
+        aimVersion++
+    }
+
+    /** What the render side should compute for the aim line now; null when no line is due. */
+    fun aimRequest(): AimRequest? {
+        if (blind || pull.length() < Physics.MIN_PULL) return null
+        return if (fullPreview) AimRequest(level, pull, LinkedHashMap(placements), PREVIEW_SAMPLE * 2, FULL_PREVIEW_SECONDS)
+        else AimRequest(level, pull, LinkedHashMap(placements), PREVIEW_SAMPLE, PREVIEW_SECONDS)
     }
 
     val probeAimPosition get() = level.launch + pull
@@ -146,6 +219,7 @@ class GameSession(val progress: Progress = Progress()) {
         if (!Placement.isValid(level, id, pos, placements - id)) return false
         placements[id] = pos
         previewCache = null
+        aimVersion++
         return true
     }
 
@@ -161,7 +235,7 @@ class GameSession(val progress: Progress = Progress()) {
         return p
     }
 
-    fun invalidatePreview() { previewCache = null }
+    fun invalidatePreview() { previewCache = null; aimVersion++ }
 
     /** Full intended path of the level's reference solution. */
     fun hintPath(): List<Vec3> {
@@ -178,6 +252,7 @@ class GameSession(val progress: Progress = Progress()) {
         if (pull.length() < Physics.MIN_PULL) {
             pull = Vec3.ZERO
             previewCache = null
+            aimVersion++
             return false
         }
         val f = Flight(level, placements)
@@ -186,6 +261,7 @@ class GameSession(val progress: Progress = Progress()) {
         attempts++
         phase = Phase.FLYING
         accumulator = 0.0
+        closest = Double.MAX_VALUE
         burnCue = if (coachBurn && level.burn) Coach.burnCueTime(level, pull, placements) else null
         return true
     }
@@ -226,12 +302,18 @@ class GameSession(val progress: Progress = Progress()) {
     val inBurnCue get() = timeScale() < 1.0
 
     /** Where the probe would go if it burned now (empty when the burn isn't available). */
-    fun burnPreview(): List<Vec3> {
-        val f = flight ?: return emptyList()
-        if (blind || phase != Phase.FLYING || !f.canBurn || burnRequested) return emptyList()
-        val g = f.fork()
-        g.burn()
-        return continueFlight(g, sampleEvery = PREVIEW_SAMPLE, maxTime = g.time + BURN_PREVIEW_SECONDS).path
+    fun burnPreview(): List<Vec3> = burnPreviewFork()?.let(::runBurnPreview) ?: emptyList()
+
+    /** A private copy of the flight for [runBurnPreview]; safe to run on another thread. */
+    fun burnPreviewFork(): Flight? {
+        val f = flight ?: return null
+        if (blind || phase != Phase.FLYING || !f.canBurn || burnRequested) return null
+        return f.fork()
+    }
+
+    fun runBurnPreview(fork: Flight): List<Vec3> {
+        fork.burn()
+        return continueFlight(fork, sampleEvery = PREVIEW_SAMPLE, maxTime = fork.time + BURN_PREVIEW_SECONDS).path
     }
 
     /**
@@ -253,6 +335,9 @@ class GameSession(val progress: Progress = Progress()) {
             if (due) { burnRequested = false; scheduledBurn = null }
             f.step(stepEvents)
             out.addAll(stepEvents)
+            val gap = f.position() - f.goalPosition()
+            val d = gap.length()
+            if (d < closest) { closest = d; closestOffset = gap }
         }
         if (f.status != FlightStatus.FLYING) finish(f)
     }
@@ -263,11 +348,20 @@ class GameSession(val progress: Progress = Progress()) {
         lastStars = f.starCount
         val before = progress.unlockedCards().toSet()
         improved = f.status == FlightStatus.SUCCESS && progress.record(level.id, f.starCount, blind)
+        if (f.status == FlightStatus.SUCCESS) lastMiss = null
+        else {
+            lastMiss = MissReport(f.status, closest, closestOffset)
+            failsOnLevel++
+        }
         newCards = progress.unlockedCards().filter { it !in before }
     }
 
     companion object {
         const val PREVIEW_SECONDS = 1.6
+        /** Misses before the assist is offered. */
+        const val ASSIST_AFTER_FAILS = 2
+        /** A pull this close to the assist marker locks onto it. */
+        const val ASSIST_LOCK = 0.03
         /** Full preview: 20 dots per second, up to 9 s (fits the 200-dot aim line). */
         const val FULL_PREVIEW_SECONDS = 9.0
         /** How far ahead the "burn now" line looks. */

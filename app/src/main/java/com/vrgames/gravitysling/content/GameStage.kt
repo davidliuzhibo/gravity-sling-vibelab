@@ -76,7 +76,7 @@ fun GameStage() {
     val hands = remember { HandTrackingProvider() }
     // The hand that pinched the current drag (0 left, 1 right, -1 unknown) and open frames seen.
     val pinch = remember { intArrayOf(-1, 0) }
-    val rimLight = remember { arrayOfNulls<Entity>(1) }
+    val backdrop = remember { arrayOfNulls<Entity>(1) }
 
     DisposableEffect(Unit) {
         // The windows wait in the scene menu: the title, mission and result cards cover a run,
@@ -98,6 +98,13 @@ fun GameStage() {
         val music = Music(context).also { Game.music = it }
         val observer = LifecycleEventObserver { _, e ->
             if (e == Lifecycle.Event.ON_RESUME) music.resume() else if (e == Lifecycle.Event.ON_PAUSE) music.pause()
+            // Home hides the stage but not the windows it opened: close them and fold the menu when the game is no
+            // longer seen at all (ON_STOP, not ON_PAUSE, which a window of our own opening also causes).
+            if (e == Lifecycle.Event.ON_STOP) {
+                Game.menuOpen = false
+                runCatching { navigator.closeWindowContainer(CONSOLE_ID) }
+                runCatching { navigator.closeWindowContainer(CODEX_ID) }
+            }
         }
         lifecycle.addObserver(observer)
         onDispose {
@@ -116,6 +123,14 @@ fun GameStage() {
         val pf = playfield ?: return@LaunchedEffect
         synchronized(Game.lock) { pf.resetVisuals(Game.session) }
     }
+    LaunchedEffect(Game.debugPullVersion) {
+        val pf = playfield ?: return@LaunchedEffect
+        if (Game.debugPullVersion == 0) return@LaunchedEffect
+        val mode = Game.debugPullMode
+        synchronized(Game.lock) { pf.debugPull(Game.session, mode) }
+        kotlinx.coroutines.delay(1500)
+        Log.i("GravityTest", "aim after pull $mode: ${synchronized(Game.lock) { pf.debugAim() }} full=${Game.fullPreview}")
+    }
     LaunchedEffect(Game.autoShotVersion) {
         val pf = playfield ?: return@LaunchedEffect
         if (Game.autoShotVersion == 0) return@LaunchedEffect
@@ -126,10 +141,14 @@ fun GameStage() {
     // Each chapter has its own sky, and the IBL and light colors that go with it.
     LaunchedEffect(Game.levelId, sky, playfield) {
         val look = ChapterLook.of(Levels.all.firstOrNull { it.id == Game.levelId }?.chapter ?: 1)
-        sky?.let { Game.assets?.setSky(it, look) }
+        sky?.let { s ->
+            // Decode a 4K panorama off the main thread, on first entering its chapter.
+            withContext(Dispatchers.IO) { Game.assets?.preloadSky(look) }
+            Game.assets?.setSky(s, look)
+        }
         Game.lighting?.chapter = ChapterLook.all.indexOf(look) + 1
         Game.sun?.components?.get(DirectionalLightComponent::class.java)?.color = Color(look.key).toColor4()
-        rimLight[0]?.components?.get(DirectionalLightComponent::class.java)?.color = Color(look.rim).toColor4()
+        backdrop[0]?.let { Game.assets?.setBackdrop(it, ChapterLook.all.indexOf(look) + 1) }
     }
     LaunchedEffect(Game.skyOn, sky, playfield) {
         sky?.enabled = Game.skyOn
@@ -160,6 +179,7 @@ fun GameStage() {
     LaunchedEffect(Game.phase, Game.lastStatus, playfield) {
         playfield?.resultUp = Game.phase == Phase.RESULT && Game.lastStatus == FlightStatus.SUCCESS
     }
+    LaunchedEffect(Game.missText, playfield) { playfield?.missUp = Game.missText != null }
     // Coach the gravity ball and the star map in the scene until the player has used each once.
     LaunchedEffect(Game.coachBall, Game.coachMap, playfield) {
         playfield?.coachBall = Game.coachBall
@@ -239,6 +259,7 @@ fun GameStage() {
             AttachmentPanel(LABEL_RESULT) { ResultPanel(converter) }
             AttachmentPanel(LABEL_BALL_INTRO) { BallIntroPanel(converter) }
             AttachmentPanel(LABEL_LEVEL) { LevelCard(converter) }
+            AttachmentPanel(LABEL_MISS) { MissPanel(converter) }
             AttachmentPanel(LABEL_MENU) {
                 MenuPanel(
                     converter,
@@ -252,19 +273,16 @@ fun GameStage() {
             playfield?.let { pf -> if (!pf.hasLabels) attachLabels(pf, attachments) }
         },
         initial = { content, attachments ->
-            // Sun: warm key light from the upper left, plus a cool rim from behind.
+            // One sun, no real-time shadows: nothing in open space falls on anything for long, and
+            // a shadow pass redraws the whole scene every frame. The IBL supplies the cool fill.
             content.addEntity(Entity().apply {
-                components.set(DirectionalLightComponent(Color(0xFFFFF1DC).toColor4(), 1100f, true))
+                components.set(DirectionalLightComponent(Color(0xFFFFF1DC).toColor4(), 1100f, false))
                 components[TransformComponent::class.java]?.setEulerAngles(EulerAngles(-35f, 50f, 0f))
                 Game.sun = this
             })
-            content.addEntity(Entity().apply {
-                components.set(DirectionalLightComponent(Color(0xFF9DB8FF).toColor4(), 160f))
-                components[TransformComponent::class.java]?.setEulerAngles(EulerAngles(-10f, -150f, 0f))
-                rimLight[0] = this
-            })
 
             val assets = Assets()
+            assets.firstSky = ChapterLook.of(Levels.all.firstOrNull { it.id == Game.levelId }?.chapter ?: 1).sky
             // Textures decode off the main thread; AI-generated models load in parallel, and
             // primitives stand in if one fails.
             val iblTextures = withContext(Dispatchers.IO) {
@@ -272,7 +290,7 @@ fun GameStage() {
                 Lighting.loadTextures()
             }
             coroutineScope {
-                val probe = async { loadModel("asset://models/probe.glb", 0.085f) }
+                val probe = async { loadModel("asset://models/probe.glb", 0.1f) }
                 val station = async { loadModel("asset://models/station.glb", 1f) }
                 val rocks = (0 until 3).map { async { loadModel("asset://models/rock$it.glb", 1f) } }
                 // Diameter 2, to match the radius-1 unit sphere it replaces.
@@ -288,6 +306,8 @@ fun GameStage() {
             val skyEntity = assets.newSky().apply { enabled = Game.skyOn }
             content.addEntity(skyEntity)
             sky = skyEntity
+            assets.newBackdrop().also { content.addEntity(it); backdrop[0] = it }
+            assets.newDebrisField()?.let { content.addEntity(it) }
 
             val lighting = Lighting(iblTextures)
             content.addEntity(lighting.source)
@@ -298,6 +318,13 @@ fun GameStage() {
             pf.placeInRoom(Game.heightOffset)
             content.addEntity(pf.root)
             lighting.receive(pf.root)
+            backdrop[0]?.let { lighting.receive(it) }
+            // Each card sits in the recess of a thick console frame.
+            val frameFiles = mapOf(LABEL_INTRO to "intro", LABEL_RESULT to "result", LABEL_BALL_INTRO to "ball_intro", LABEL_LEVEL to "level", LABEL_MISS to "miss")
+            frameFiles.forEach { (id, file) ->
+                runCatching { Entity.loadSuspend("asset://panels/panel_$file.glb") }.getOrNull()?.let { pf.addFrame(id, it) }
+            }
+            pf.onAimGold = { gold -> main.post { Game.aimDelivers = gold } }
             // Spatial audio: effects are emitted from the playfield.
             pf.sound = Sound(pf.root).also { it.load(); Game.sound = it }
             pf.post = { r -> main.post(r) }
@@ -339,6 +366,7 @@ private fun attachLabels(pf: Playfield, attachments: SpatialViewAttachments) {
         attachments.entity(LABEL_BURN), attachments.entity(LABEL_BALL), attachments.entity(LABEL_MAP),
         attachments.entity(LABEL_INTRO), attachments.entity(LABEL_PULL),
         attachments.entity(LABEL_RESULT), attachments.entity(LABEL_MENU), attachments.entity(LABEL_BALL_INTRO), attachments.entity(LABEL_LEVEL),
+        attachments.entity(LABEL_MISS),
     )
 }
 

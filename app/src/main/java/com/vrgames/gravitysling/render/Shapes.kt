@@ -93,11 +93,15 @@ class DotLine(
     private val dotScale: Float = 1f,
 ) {
     val entity: Entity = ModelEntity(mesh, material)
+    private val ids = Array(capacity) { "$name$it" }
     private val instances = MeshInstancesResource.create(
         name,
-        (0 until capacity).map { MeshInstancesResource.Instance("$name$it", hidden()) },
+        ids.map { MeshInstancesResource.Instance(it, hidden()) },
     )
     private var shown = 0
+    /** Debug: how many dots are showing and where the last one is. */
+    val count get() = shown
+    var last: Vec3? = null; private set
 
     init {
         entity.components[ModelComponent::class.java]!!.meshInstances = instances
@@ -110,17 +114,18 @@ class DotLine(
         val n = minOf(points.size, capacity)
         for (i in 0 until n) {
             val s = if (taper) dotScale * (1f - 0.6f * i / n.coerceAtLeast(1)) else dotScale
-            instances.update("$name$i", Transform(points[i].toVector3(), EulerAngles(0f, 0f, 0f), Vector3(s)))
+            instances.update(ids[i], Transform(points[i].toVector3(), EulerAngles(0f, 0f, 0f), Vector3(s)))
         }
-        for (i in n until shown) instances.update("$name$i", hidden())
+        for (i in n until shown) instances.update(ids[i], hidden())
         shown = n
+        last = if (n > 0) points[n - 1] else null
     }
 
     fun clear() = show(emptyList())
 
     /** Sets a single slot (for ring-buffer style trails); cheaper than [show]. */
     fun set(slot: Int, p: Vec3) {
-        instances.update("$name$slot", Transform(p.toVector3(), EulerAngles(0f, 0f, 0f), Vector3(dotScale)))
+        instances.update(ids[slot], Transform(p.toVector3(), EulerAngles(0f, 0f, 0f), Vector3(dotScale)))
         if (slot >= shown) shown = slot + 1
     }
 }

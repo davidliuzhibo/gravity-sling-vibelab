@@ -31,6 +31,8 @@ class Assets {
     val launcherMesh: MeshResource = MeshResource.createTorus(0.1f, 0.088f).shared()
 
     val aimMaterial = unlit(color(0.45f, 0.9f, 1f)).shared()
+    val aimGoldMaterial = unlit(color(1f, 0.82f, 0.25f)).shared()
+    val assistMaterial = unlit(color(1f, 0.8f, 0.25f, 0.55f), BlendingMode.TRANSPARENT).shared()
     val trailMaterial = unlit(color(1f, 0.62f, 0.25f)).shared()
     val hintMaterial = unlit(color(1f, 0.85f, 0.3f, 0.55f), BlendingMode.TRANSPARENT).shared()
     val bandMaterial = unlit(color(1f, 0.78f, 0.35f)).shared()
@@ -82,10 +84,17 @@ class Assets {
 
     /** Call from a background dispatcher, before the first level is built. */
     fun loadTextures() {
-        ChapterLook.all.forEach { texture(it.sky) }
+        // Only the sky in use: each 4K panorama is about 45 MB of texture memory. [preloadSky] brings in the others.
+        texture(firstSky)
         for (p in listOf("earth", "mars", "jupiter", "moon")) texture("textures/$p.jpg")
         normalMaps.values.forEach(::texture)
     }
+
+    /** The sky of the chapter the game resumes in; set before [loadTextures]. */
+    var firstSky = ChapterLook.of(1).sky
+
+    /** Decode a chapter's sky ahead of [setSky]; call from a background dispatcher. */
+    fun preloadSky(look: ChapterLook) { texture(look.sky) }
 
     private fun texture(path: String): TextureResource = textures.getOrPut(path) {
         val normal = path in normalMaps.values
@@ -102,7 +111,7 @@ class Assets {
     }
 
     // Atmospheres and halos: additive back-face shells (see [rim]), inner layers brighter.
-    private val earthRims = listOf(rim(color(0.45f, 0.75f, 1f, 0.55f)), rim(color(0.35f, 0.6f, 1f, 0.25f)), rim(color(0.3f, 0.5f, 1f, 0.1f))).map { it.shared() }
+    private val earthRims = listOf(rim(color(0.45f, 0.75f, 1f, 0.6f)), rim(color(0.33f, 0.56f, 1f, 0.28f))).map { it.shared() }
     private val marsRims = listOf(rim(color(1f, 0.6f, 0.4f, 0.3f)), rim(color(1f, 0.55f, 0.35f, 0.1f))).map { it.shared() }
     private val jupiterRims = listOf(rim(color(1f, 0.85f, 0.6f, 0.22f)), rim(color(1f, 0.8f, 0.55f, 0.08f))).map { it.shared() }
     private val ballRims = listOf(rim(color(0.7f, 0.45f, 1f, 0.5f)), rim(color(0.6f, 0.35f, 1f, 0.2f))).map { it.shared() }
@@ -321,7 +330,56 @@ class Assets {
     }
 
     /** Inside-out sphere with the first chapter's panorama (the Milky Way). */
-    fun newSky(): Entity = model(MeshResource.createSphere(40f), skyMaterial(ChapterLook.of(1).sky))
+    fun newSky(): Entity = model(MeshResource.createSphere(40f), skyMaterial(firstSky))
+
+    /**
+     * A big world far beyond the playfield, so the sky has scale. It never takes part in the flight.
+     * One sphere with a soft atmosphere; [setBackdrop] changes its look per chapter.
+     */
+    fun newBackdrop(): Entity = Entity().apply {
+        addChild(model(unitSphere, bodyMaterial("jupiter")))
+        addChild(model(unitSphere, jupiterRims[0]).apply { setScale(1.03f) })
+        setPos(Vector3(-13f, 2.5f, -24f))
+        setScale(8f)
+    }
+
+    fun setBackdrop(backdrop: Entity, chapter: Int) {
+        val look = when (chapter) { 1 -> "earth"; 2 -> "mars"; else -> "jupiter" }
+        backdrop.getChildren().firstOrNull()?.let { setMaterials(it, bodyMaterial(look)) }
+        val rims = when (chapter) { 1 -> earthRims; 2 -> marsRims; else -> jupiterRims }
+        backdrop.getChildren().getOrNull(1)?.let { setMaterials(it, rims[0]) }
+    }
+
+    /**
+     * A field of distant rocks around the play volume, one instanced draw. Clearly beyond the bodies
+     * of the level, so it reads as scenery and never as an obstacle.
+     */
+    fun newDebrisField(count: Int = 36): Entity? {
+        val rock = rockTemplates.firstOrNull() ?: return null
+        val mesh = firstMesh(rock) ?: return null
+        var seed = 11
+        fun rnd(): Float { seed = seed * 1103515245 + 12345; return ((seed ushr 8) and 0xFFFF) / 65536f }
+        val instances = (0 until count).map { i ->
+            val a = rnd() * 6.2832f
+            val r = 3.2f + rnd() * 3.5f
+            val y = (rnd() - 0.5f) * 2.2f
+            val s = .05f + rnd() * rnd() * .28f
+            com.pico.spatial.core.ecs.resource.MeshInstancesResource.Instance(
+                "debris$i",
+                com.pico.spatial.core.math.Transform(
+                    Vector3(r * kotlin.math.cos(a), y, r * kotlin.math.sin(a)),
+                    EulerAngles(rnd() * 360f, rnd() * 360f, rnd() * 360f),
+                    Vector3(s),
+                ),
+            )
+        }
+        return com.pico.spatial.core.ecs.ModelEntity(mesh, rockMat).also {
+            it.components[ModelComponent::class.java]!!.meshInstances = com.pico.spatial.core.ecs.resource.MeshInstancesResource.create("debris", instances)
+        }
+    }
+
+    private fun firstMesh(e: Entity): MeshResource? =
+        e.components[ModelComponent::class.java]?.mesh ?: e.getChildren().firstNotNullOfOrNull { firstMesh(it) }
 
     /** Swaps the panorama on a sphere made by [newSky]. */
     fun setSky(sky: Entity, look: ChapterLook) = setMaterials(sky, skyMaterial(look.sky))

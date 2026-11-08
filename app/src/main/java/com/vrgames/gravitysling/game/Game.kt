@@ -88,6 +88,13 @@ object Game {
     var coachMap by mutableStateOf(false); private set
     /** The flight is in its burn-coaching slow motion right now. */
     var burnCue by mutableStateOf(false); private set
+    /** Why the last flight failed, in front of the player until the next grab. */
+    var missText by mutableStateOf<String?>(null); private set
+    /** The player has missed often enough to be offered the aim assist. */
+    var assistOffered by mutableStateOf(false); private set
+    var aimAssist by mutableStateOf(false); private set
+    /** The aim line reaches the station right now. */
+    var aimDelivers by mutableStateOf(false)
     /** The "how to play" card in the console. */
     var showGuide by mutableStateOf(false)
     /** The gravity-ball explainer has been put away (this run); it shows while the ball is coached. */
@@ -147,6 +154,14 @@ object Game {
     /** Debug: the next auto shot flies like a player's (burn coaching on, no scheduled burn). */
     @Volatile var autoShotCoached = false
 
+    /** Debug only (AutoPilot "pull"): hold the probe at a pull ("sol", "alt") or let go ("off"). */
+    @Volatile var debugPullMode = "off"
+    var debugPullVersion by mutableIntStateOf(0); private set
+    fun requestDebugPull(mode: String) {
+        debugPullMode = mode
+        debugPullVersion++
+    }
+
     fun requestAutoShot(miss: Boolean = false, coached: Boolean = false) {
         autoShotMiss = miss
         autoShotCoached = coached
@@ -166,6 +181,7 @@ object Game {
     // ---- Tutorial hooks (called from the stage on the main thread) -----------------------------
     fun onProbeGrabbed() {
         mapShown = false
+        missText = null
         levelCardDismissed = true
         tutorialChanged(tutorial.onGrab())
     }
@@ -174,6 +190,7 @@ object Game {
 
     fun onBallGrabbed() {
         mapShown = false
+        missText = null
         ballIntroDismissed = true
         levelCardDismissed = true
     }
@@ -219,6 +236,7 @@ object Game {
         newCards = emptyList()
         mapShown = false
         levelCardDismissed = false
+        missText = null
         synchronized(lock) { session.load(id) }
         refresh(levelChanged = true)
     }
@@ -234,6 +252,16 @@ object Game {
 
     /** Pinch during a flight: fire the engine once (if this level allows it). */
     fun requestBurn(): Boolean = synchronized(lock) { session.requestBurn() }
+
+    /** From the miss card: show where to pull, and lock on when the pull comes near it. */
+    fun enableAssist() {
+        missText = null
+        synchronized(lock) { session.enableAssist() }
+        resetVersion++
+        refresh()
+    }
+
+    fun dismissMiss() { missText = null }
 
     fun toggleBlind() {
         synchronized(lock) {
@@ -287,6 +315,8 @@ object Game {
             canBurn = s.phase == Phase.FLYING && s.flight?.canBurn == true
             burnedThisFlight = s.flight?.burnUsed == true
             burnCue = s.inBurnCue
+            assistOffered = s.assistOffered
+            aimAssist = s.aimAssist
             // Coach the burn only once the slingshot itself has been learned.
             s.coachBurn = !coach.done(Coach.Topic.BURN) && tutorial.step == null
         }
@@ -300,6 +330,7 @@ object Game {
     /** Persists progress after a successful delivery. */
     fun onFlightFinished() {
         refresh()
+        missText = synchronized(lock) { session.lastMiss?.describe(session.level.goal.radius) }
         if (lastStatus == FlightStatus.SUCCESS) {
             val text = synchronized(lock) { session.progress.serialize() }
             prefs?.edit()?.putString(KEY_PROGRESS, text)?.apply()

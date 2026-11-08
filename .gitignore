@@ -41,3 +41,5 @@ google-services.json
 *.keystore
 *.pem
 keystore.properties
+**/build/
+.env*

@@ -42,6 +42,18 @@ class Playfield(private val assets: Assets) {
     // Persistent pieces (survive level changes).
     private val probe = Entity()
     private val aim = DotLine("aim", 200, assets.dotMesh, assets.aimMaterial, 1f)
+    /** Physics for the aim and burn lines runs here, never on the render thread; only the newest request matters. */
+    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "aim-line").apply { isDaemon = true } }
+    private val aimBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var aimResult: com.vrgames.gravitysling.core.AimResult? = null
+    private var aimAskedFor = -1
+    private var aimLastAsk = Double.NEGATIVE_INFINITY
+    private val burnBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var burnResult: List<Vec3>? = null
+    private var burnLastAsk = 0.0
+    private var aimGold = false
+    /** Gold marker where the aim assist wants the probe pulled to. */
+    private val assistMark = model(assets.unitSphere, assets.assistMaterial).apply { enabled = false; setScale(0.03f) }
     private val trail = DotLine("trail", 240, assets.dotMesh, assets.trailMaterial, 0.7f)
     private val hint = DotLine("hint", 320, assets.dotMesh, assets.hintMaterial, 0.8f)
     /** During a flight: where the probe would go if it burned now. */
@@ -102,6 +114,8 @@ class Playfield(private val assets: Assets) {
     var ballIntroUp = false
     /** Set by the stage while the level's mission card should show. */
     var levelCardUp = false
+    /** Called (render thread) when the aim line starts or stops reaching the station. */
+    var onAimGold: ((Boolean) -> Unit)? = null
     /** Called (render thread) when the note over a dragged ball changes: why it cannot sit there, or null. */
     var onBallNotice: ((String?) -> Unit)? = null
     private var ballNotice: String? = null
@@ -132,6 +146,11 @@ class Playfield(private val assets: Assets) {
     private var menuLabel: Entity? = null
     private var ballIntroLabel: Entity? = null
     private var levelLabel: Entity? = null
+    private var missLabel: Entity? = null
+    /** Thick console frames for the card panels, by attachment id; each is added to its panel once both exist. */
+    private val frames = HashMap<String, Entity>()
+    /** Set by the stage after a miss: the card that says how far off it was. */
+    var missUp = false
     private var ballLabel: Entity? = null
     private var mapLabel: Entity? = null
     /** Translucent ball that demonstrates dragging a gravity ball out of its dock. */
@@ -201,15 +220,26 @@ class Playfield(private val assets: Assets) {
         root.addChild(burnShell)
         grabs[burnShell] = Grab.Burn
         root.addChild(ballGhost)
+        root.addChild(assistMark)
     }
 
-    val hasLabels get() = burnLabel != null && ballLabel != null && mapLabel != null && introLabel != null && pullLabel != null && resultLabel != null && menuLabel != null && ballIntroLabel != null && levelLabel != null
+    val hasLabels get() = burnLabel != null && ballLabel != null && mapLabel != null && introLabel != null && pullLabel != null && resultLabel != null && menuLabel != null && ballIntroLabel != null && levelLabel != null && missLabel != null
+
+    /** Gives a card panel its frame, sitting just behind the text. */
+    fun addFrame(id: String, frame: Entity) { frames[id] = frame }
+    private fun fit(id: String, panel: Entity?) {
+        val frame = frames.remove(id) ?: return
+        val p = panel ?: run { frames[id] = frame; return }
+        frame.setPos(Vector3(0f, 0f, FRAME_BEHIND))
+        p.addChild(frame)
+        lighting?.receive(p)
+    }
 
     /**
      * Takes the stage's coaching label panels (any still null are taken on a later call); they
      * stay hidden until their coaching is due.
      */
-    fun attachLabels(burn: Entity?, ball: Entity?, map: Entity?, intro: Entity?, pull: Entity?, result: Entity?, menu: Entity?, ballIntro: Entity?, level: Entity?) {
+    fun attachLabels(burn: Entity?, ball: Entity?, map: Entity?, intro: Entity?, pull: Entity?, result: Entity?, menu: Entity?, ballIntro: Entity?, level: Entity?, miss: Entity?) {
         fun take(e: Entity?, old: Entity?): Entity? {
             if (e == null || old != null) return old
             e.enabled = false
@@ -225,6 +255,12 @@ class Playfield(private val assets: Assets) {
         menuLabel = take(menu, menuLabel)
         ballIntroLabel = take(ballIntro, ballIntroLabel)
         levelLabel = take(level, levelLabel)
+        missLabel = take(miss, missLabel)
+        fit(com.vrgames.gravitysling.content.LABEL_INTRO, introLabel)
+        fit(com.vrgames.gravitysling.content.LABEL_RESULT, resultLabel)
+        fit(com.vrgames.gravitysling.content.LABEL_BALL_INTRO, ballIntroLabel)
+        fit(com.vrgames.gravitysling.content.LABEL_LEVEL, levelLabel)
+        fit(com.vrgames.gravitysling.content.LABEL_MISS, missLabel)
     }
 
     /** Golden shower above [at] (chapter finished). */
@@ -380,6 +416,13 @@ class Playfield(private val assets: Assets) {
         probe.setPos(lv.launch)
         goalEntity?.setPos(lv.goal.pos)
         burnLine.clear()
+        burnResult = null
+        aimResult = null
+        aimAskedFor = -1
+        // The playfield clock just went back to 0: the throttle's last ask must go with it, or no aim line is asked for
+        // until the new clock catches up with the old one (seconds to minutes with no line at all).
+        aimLastAsk = Double.NEGATIVE_INFINITY
+        setAimGold(false)
         burnShell.enabled = false
         updateBallGlow(session)
         starEntities.forEach { it.enabled = true }
@@ -439,6 +482,32 @@ class Playfield(private val assets: Assets) {
         if (g == Grab.Probe) sfx(Sfx.STRETCH, session.level.launch)
         if (g is Grab.Ball) ballDragPos = session.placements[g.id] ?: Vec3.ZERO
     }
+
+    /**
+     * Debug only (AutoPilot "pull"): holds the probe at a pull as a hand would, through the same [GameSession.setPull] a
+     * drag uses, so the aim line can be checked without hands. "sol": the level's reference pull; "alt": a shorter pull
+     * off to the side; anything else lets go without firing.
+     */
+    fun debugPull(session: GameSession, mode: String) {
+        val sol = session.level.solution?.pull ?: Vec3(0.0, 0.0, 0.12)
+        val v = when (mode) {
+            "sol" -> sol
+            "alt" -> sol * 0.7 + Vec3(0.03, 0.0, 0.0)
+            else -> null
+        }
+        if (v == null) {
+            dragging = null
+            handOffset = Vec3.ZERO
+            session.setPull(Vec3.ZERO)
+        } else {
+            dragging = Grab.Probe
+            handOffset = v
+            session.setPull(v)
+        }
+    }
+
+    /** Debug: what the aim line shows now. */
+    fun debugAim() = "points=${aim.count} end=${aim.last?.let { "%.3f,%.3f,%.3f".format(it.x, it.y, it.z) }} gold=$aimGold"
 
     /** [delta] is the hand's movement since the last callback, in meters (playfield axes). */
     fun drag(delta: Vec3, session: GameSession) {
@@ -547,11 +616,16 @@ class Playfield(private val assets: Assets) {
                     probe.setPos(p)
                     updateBands(p, true)
                 }
-                val preview = session.preview()
-                if (preview !== aimShownFor) {
-                    aim.show(preview, taper = !session.fullPreview)
-                    aimShownFor = preview
+                requestAimLine(session)
+                val result = aimResult
+                if (result != null) {
+                    aimResult = null
+                    aim.show(result.path, taper = !session.fullPreview)
+                    setAimGold(result.delivers)
                 }
+                val mark = session.assistPull
+                assistMark.enabled = mark != null && !titleUp
+                if (mark != null) assistMark.setPos(session.level.launch + mark)
             }
             Phase.FLYING -> {
                 // Burn coaching slows the flight itself; effects and pulses keep real time.
@@ -562,7 +636,17 @@ class Playfield(private val assets: Assets) {
                 // The engine is still available: pinch area on, "burn now" line every other frame.
                 val burnable = f.canBurn && session.phase == Phase.FLYING
                 if (burnShell.enabled != burnable) burnShell.enabled = burnable
-                if (!burnable) burnLine.clear() else if (stepCounter % 2 == 0) burnLine.show(session.burnPreview(), taper = true)
+                assistMark.enabled = false
+                if (!burnable) burnLine.clear() else {
+                    if (time - burnLastAsk >= BURN_LINE_PERIOD && burnBusy.compareAndSet(false, true)) {
+                        burnLastAsk = time
+                        val fork = session.burnPreviewFork()
+                        if (fork == null) burnBusy.set(false) else worker.execute {
+                            try { burnResult = session.runBurnPreview(fork) } finally { burnBusy.set(false) }
+                        }
+                    }
+                    burnResult?.let { burnLine.show(it, taper = true); burnResult = null }
+                }
                 for (i in bodySpecs.indices) if (bodySpecs[i].orbit != null) bodyEntities[i].setPos(f.bodyPosition(i))
                 // Ion exhaust streaming back from the probe.
                 if (probeShown) exhaust.emit(f.position(), 1, 0.02, 0.5, 0.008f, f.velocity() * -0.25)
@@ -658,6 +742,33 @@ class Playfield(private val assets: Assets) {
         exhaust.update(dt, drag = 0.5)
         dust.update(time)
         return uiChanged
+    }
+
+    /** Asks the worker for the aim line when the aim changed, at most about 20 times a second. */
+    private fun requestAimLine(session: GameSession) {
+        val version = session.aimVersion
+        if (version == aimAskedFor || time - aimLastAsk < AIM_LINE_PERIOD) return
+        val request = session.aimRequest()
+        if (request == null) {
+            aimAskedFor = version
+            aim.clear()
+            setAimGold(false)
+            return
+        }
+        if (!aimBusy.compareAndSet(false, true)) return
+        aimAskedFor = version
+        aimLastAsk = time
+        worker.execute {
+            try { aimResult = request.run() } finally { aimBusy.set(false) }
+        }
+    }
+
+    /** The aim line turns gold when it really reaches the station: no guessing whether the shot is good. */
+    private fun setAimGold(gold: Boolean) {
+        if (gold == aimGold) return
+        aimGold = gold
+        aim.entity.components[com.pico.spatial.core.ecs.ModelComponent::class.java]?.materials?.set(0, if (gold) assets.aimGoldMaterial else assets.aimMaterial)
+        onAimGold?.invoke(gold)
     }
 
     private fun animate(dt: Double) {
@@ -813,7 +924,12 @@ class Playfield(private val assets: Assets) {
             if (on) it.setPos(INTRO_PANEL_POS)
         }
         levelLabel?.let {
-            val on = levelCardUp && !titleUp && !ballIntroUp && session.phase == Phase.AIMING
+            val on = levelCardUp && !missUp && !titleUp && !ballIntroUp && session.phase == Phase.AIMING
+            showIf(it, on)
+            if (on) it.setPos(SIDE_CARD_POS)
+        }
+        missLabel?.let {
+            val on = missUp && !titleUp && dragging == null
             showIf(it, on)
             if (on) it.setPos(SIDE_CARD_POS)
         }
@@ -882,11 +998,14 @@ class Playfield(private val assets: Assets) {
         const val BASE_Z = -1.0f
         const val LAUNCHER_RADIUS = 0.095
         const val AUTO_RETRY_SECONDS = 1.4
+        private const val AIM_LINE_PERIOD = 0.05
+        private const val BURN_LINE_PERIOD = 0.12
         /** How far back (ms) the release looks for a steady pull. */
         private const val RELEASE_SETTLE_MS = 150L
         private val DEMO_PULL = Vec3(0.0, -0.04, 0.18)
         /** Where the ghost drags a ball whose level has no reference placement for it. */
         private val BALL_DEMO_MOVE = Vec3(-0.2, 0.15, -0.2)
+        private const val FRAME_BEHIND = -0.006f
         private val LABEL_OVER_PROBE = Vec3(0.0, 0.09, 0.0)
         private val LABEL_OVER_LAUNCHER = Vec3(0.0, 0.14, 0.0)
         /** Title card and explainers: about 0.75 m from a seated player, just above the launcher ring. */

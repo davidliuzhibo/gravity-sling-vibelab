@@ -1,5 +1,10 @@
 package com.vrgames.gravitysling.content
 
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -46,12 +51,25 @@ const val LABEL_RESULT = "result"
 const val LABEL_MENU = "menu"
 const val LABEL_BALL_INTRO = "ball_intro"
 const val LABEL_LEVEL = "level_card"
+const val LABEL_MISS = "miss_card"
 
 /** Text height in the scene, so the labels read at arm's length to about 1.5 m. */
 private const val TEXT_METERS = 0.022f
 
 private val Ink = Color(0xFFEAF6FF)
-private val Panel = Color(0xCC0B1426)
+private val Panel = Color(0xE60B1426)
+
+/** Inside sizes of the thick console frames (panels/panel_*.glb, tools/panel3d); the text must fit. */
+private const val INTRO_W = 0.54f
+private const val INTRO_H = 0.46f
+private const val RESULT_W = 0.48f
+private const val RESULT_H = 0.34f
+private const val BALL_W = 0.52f
+private const val BALL_H = 0.56f
+private const val LEVEL_W = 0.42f
+private const val LEVEL_H = 0.27f
+private const val MISS_W = 0.44f
+private const val MISS_H = 0.25f
 
 /**
  * A short instruction floating in the scene next to what it is about, with an animated pinch
@@ -59,13 +77,13 @@ private val Panel = Color(0xCC0B1426)
  * density. [onPinch]: the label itself is pinchable (the burn label fires the engine).
  */
 @Composable
-fun CoachLabel(text: String, accent: Color, converter: PhysicalLengthConverter, onPinch: (() -> Unit)? = null) {
+fun CoachLabel(text: String, accent: Color, converter: PhysicalLengthConverter, primary: Boolean = false, onPinch: (() -> Unit)? = null) {
     fun m(meters: Float): Dp = converter.lengthToDp(meters, LengthUnit.Meters)
-    val shape = RoundedCornerShape(m(0.02f))
+    val shape = RoundedCornerShape(m(0.012f))
     var mod = Modifier
         .widthIn(max = m(0.4f))
         .clip(shape)
-        .background(Panel)
+        .background(if (primary) accent else Panel)
         .border(m(0.002f), accent, shape)
     if (onPinch != null) mod = mod.clickable { onPinch() }
     Row(
@@ -73,8 +91,8 @@ fun CoachLabel(text: String, accent: Color, converter: PhysicalLengthConverter, 
         horizontalArrangement = Arrangement.spacedBy(m(0.012f)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PinchIcon(accent, m(0.034f))
-        Text(text, fontSize = m(TEXT_METERS).value.sp, color = Ink)
+        PinchIcon(if (primary) Color(0xFF1A1200) else accent, m(0.034f))
+        Text(text, fontSize = m(TEXT_METERS).value.sp, color = if (primary) Color(0xFF1A1200) else Ink)
     }
 }
 
@@ -127,7 +145,7 @@ fun PullLabel(converter: PhysicalLengthConverter) {
         Tutorial.Step.RELEASE -> "③ 松开手指 = 发射！"
         else -> "捏住 · 往身前拉 · 松手发射"
     }
-    CoachLabel(text, Color(0xFF6FE3FF), converter)
+    CoachLabel(if (Game.aimDelivers && Game.tutorialStep == null) "金色航线能送达，松手发射！" else text, if (Game.aimDelivers) Color(0xFFFFD36B) else Color(0xFF6FE3FF), converter)
 }
 
 /**
@@ -145,12 +163,7 @@ fun IntroPanel(converter: PhysicalLengthConverter) {
     val cyan = Color(0xFF6FE3FF)
     val gold = Color(0xFFFFD36B)
     val shape = RoundedCornerShape(m(0.025f))
-    Column(
-        Modifier.width(m(0.52f)).clip(shape).background(Panel).border(m(0.002f), cyan, shape)
-            .padding(horizontal = m(0.03f), vertical = m(0.024f)),
-        verticalArrangement = Arrangement.spacedBy(m(0.012f)),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
+    FitColumn(Modifier.size(m(INTRO_W), m(INTRO_H)).padding(horizontal = m(0.024f), vertical = m(0.012f)), m(0.01f), Alignment.CenterHorizontally) {
         Text("引力弹弓 · 星驿快递", fontSize = size(0.042f), color = cyan)
         Text("借行星的引力拐弯，把包裹送进空间站。", fontSize = size(0.022f), color = Ink)
         Column(verticalArrangement = Arrangement.spacedBy(m(0.006f))) {
@@ -160,7 +173,7 @@ fun IntroPanel(converter: PhysicalLengthConverter) {
             Text("③ 两根手指张开，就发射。收集星星，飞进空间站就算送达", fontSize = size(0.02f), color = Ink)
             Text("随时可以捏左下方的「菜单」：打开调度台、图鉴，或者退出（进度自动保存）", fontSize = size(0.017f), color = Color(0xFFB8C2D6))
         }
-        CoachLabel(if (fresh) "捏一下这里：开始第一单" else "捏一下这里：继续派送（★ ${progress.totalStars()}）", gold, converter) {
+        CoachLabel(if (fresh) "捏一下这里：开始第一单" else "捏一下这里：继续派送（★ ${progress.totalStars()}）", gold, converter, primary = true) {
             Game.startGame()
         }
         Text(DISCLAIMER, fontSize = size(0.0125f), color = Color(0xFFB8C2D6))
@@ -181,12 +194,7 @@ fun ResultPanel(converter: PhysicalLengthConverter) {
     val level = Levels.byId(Game.levelId)
     val next = Levels.all.getOrNull(Levels.all.indexOf(level) + 1)?.takeIf { Game.progress().unlocked(it) }
     val shape = RoundedCornerShape(m(0.025f))
-    Column(
-        Modifier.width(m(0.46f)).clip(shape).background(Panel).border(m(0.002f), gold, shape)
-            .padding(horizontal = m(0.026f), vertical = m(0.02f)),
-        verticalArrangement = Arrangement.spacedBy(m(0.012f)),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
+    FitColumn(Modifier.size(m(RESULT_W), m(RESULT_H)).padding(horizontal = m(0.02f), vertical = m(0.01f)), m(0.01f), Alignment.CenterHorizontally) {
         Text("送达！${"★".repeat(Game.lastStars)}${"☆".repeat(3 - Game.lastStars)}" + if (Game.improved) "  新纪录" else "",
             fontSize = size(0.036f), color = gold)
         Game.celebration?.let { c ->
@@ -196,7 +204,7 @@ fun ResultPanel(converter: PhysicalLengthConverter) {
         val cards = Game.newCards.mapNotNull { com.vrgames.gravitysling.core.Codex.byId(it)?.title }
         if (cards.isNotEmpty()) Text("新图鉴：${cards.joinToString("、")}（菜单 → 航天图鉴）", fontSize = size(0.018f), color = cyan)
         if (next != null) {
-            CoachLabel("下一单：${if (next.challenge) "挑战" else next.id}「${next.title}」 →", cyan, converter) { Game.next() }
+            CoachLabel("下一单：${if (next.challenge) "挑战" else next.id}「${next.title}」 →", Color(0xFFFFD36B), converter, primary = true) { Game.next() }
         } else {
             Text("这一章的航线都送完了！捏住上方星图里的星星，可以去任意一关。", fontSize = size(0.02f), color = Ink)
         }
@@ -241,11 +249,7 @@ fun BallIntroPanel(converter: PhysicalLengthConverter) {
     val violet = Color(0xFFB98CFF)
     val gold = Color(0xFFFFD36B)
     val shape = RoundedCornerShape(m(0.025f))
-    Column(
-        Modifier.width(m(0.5f)).clip(shape).background(Panel).border(m(0.002f), violet, shape)
-            .padding(horizontal = m(0.028f), vertical = m(0.022f)),
-        verticalArrangement = Arrangement.spacedBy(m(0.01f)),
-    ) {
+    FitColumn(Modifier.size(m(BALL_W), m(BALL_H)).padding(horizontal = m(0.022f), vertical = m(0.01f)), m(0.008f)) {
         Text("新道具：引力球", fontSize = size(0.036f), color = violet)
         Text("是什么", fontSize = size(0.018f), color = gold)
         Text("发射架旁边那颗会发光的紫色小球，是一颗能用手搬动的小星球。它和地球、月球一样有引力。", fontSize = size(0.02f), color = Ink)
@@ -254,7 +258,7 @@ fun BallIntroPanel(converter: PhysicalLengthConverter) {
         Text("怎么用", fontSize = size(0.018f), color = gold)
         Text("① 用拇指和食指捏住紫色小球（两根手指捏，不要整只手抓）\n② 保持捏住，拖到空中：半透明的球在示范放哪儿\n③ 两根手指张开，球就放下了，蓝色瞄准线会马上变弯\n④ 线对准空间站了，再去拉弹弓发射", fontSize = size(0.02f), color = Ink)
         Text("有些地方放不下（贴着发射架、挡住拉弓的位置、压住星星）：球上方会说明原因，松手后它会退回上一个能放的位置。", fontSize = size(0.016f), color = Color(0xFFB8C2D6))
-        CoachLabel("知道了，试试看", violet, converter) { Game.ballIntroDismissed = true }
+        CoachLabel("知道了，试试看", Color(0xFFFFD36B), converter, primary = true) { Game.ballIntroDismissed = true }
     }
 }
 
@@ -266,14 +270,49 @@ fun LevelCard(converter: PhysicalLengthConverter) {
     val level = Levels.byId(Game.levelId)
     val cyan = Color(0xFF6FE3FF)
     val shape = RoundedCornerShape(m(0.022f))
-    Column(
-        Modifier.width(m(0.4f)).clip(shape).background(Panel).border(m(0.002f), cyan, shape)
-            .padding(horizontal = m(0.022f), vertical = m(0.018f)),
-        verticalArrangement = Arrangement.spacedBy(m(0.008f)),
-    ) {
+    FitColumn(Modifier.size(m(LEVEL_W), m(LEVEL_H)).padding(horizontal = m(0.018f), vertical = m(0.008f)), m(0.006f)) {
         Text((if (level.challenge) "挑战" else "任务 ${level.id}") + "「${level.title}」", fontSize = size(0.026f), color = cyan)
         Text(level.brief, fontSize = size(0.018f), color = Ink)
         Text("提示：${level.tip}", fontSize = size(0.016f), color = Color(0xFFB8C2D6))
-        CoachLabel("知道了", cyan, converter) { Game.levelCardDismissed = true }
+        CoachLabel("知道了", Color(0xFFFFD36B), converter, primary = true) { Game.levelCardDismissed = true }
+    }
+}
+
+/** After a miss: how far off it was and which way to change the pull, and the assist after repeated misses. */
+@Composable
+fun MissPanel(converter: PhysicalLengthConverter) {
+    fun m(meters: Float): Dp = converter.lengthToDp(meters, LengthUnit.Meters)
+    fun size(meters: Float) = m(meters).value.sp
+    val gold = Color(0xFFFFD36B)
+    FitColumn(Modifier.size(m(MISS_W), m(MISS_H)).padding(horizontal = m(0.018f), vertical = m(0.008f)), m(0.008f)) {
+        Text("这一单没送到", fontSize = size(0.026f), color = Color(0xFFFFA45C))
+        Text(Game.missText ?: "", fontSize = size(0.019f), color = Ink)
+        if (Game.assistOffered) CoachLabel("开启辅助瞄准：把探测器拉到金色标记", gold, converter, primary = true) { Game.enableAssist() }
+        if (Game.aimAssist) Text("辅助瞄准已开启：拉近金色标记会自动锁定", fontSize = size(0.017f), color = gold)
+        CoachLabel("收起", Color(0xFFB8C2D6), converter) { Game.dismissMiss() }
+    }
+}
+
+
+/**
+ * A fixed-size card column (its size matches the console frame around it). The content is measured at full height first;
+ * if a longer brief or tip makes it taller than the card, the whole column is scaled down to fit, so the gold button
+ * at the bottom is never cut off by the card's lower edge.
+ */
+@Composable
+fun FitColumn(modifier: Modifier, gap: Dp, horizontal: Alignment.Horizontal = Alignment.Start, content: @Composable ColumnScope.() -> Unit) {
+    Layout(content = { Column(verticalArrangement = Arrangement.spacedBy(gap), horizontalAlignment = horizontal) { content() } }, modifier = modifier) { measurables, constraints ->
+        // A centred column takes the card's full width, so its rows stay centred after scaling.
+        val p = measurables[0].measure(constraints.copy(minWidth = if (horizontal == Alignment.Start) 0 else constraints.maxWidth, minHeight = 0, maxHeight = Constraints.Infinity))
+        val s = if (p.height > constraints.maxHeight) constraints.maxHeight.toFloat() / p.height else 1f
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            val x = ((constraints.maxWidth - p.width * s) / 2f).roundToInt().coerceAtLeast(0)
+            val y = ((constraints.maxHeight - p.height * s) / 2f).roundToInt().coerceAtLeast(0)
+            p.placeWithLayer(x, y) {
+                scaleX = s
+                scaleY = s
+                transformOrigin = TransformOrigin(0f, 0f)
+            }
+        }
     }
 }

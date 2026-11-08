@@ -30,7 +30,8 @@ import com.vrgames.gravitysling.core.Levels
  * map --es id 0|1 (star map) · pick --es id 2-3 (pinch that star on the map) · blind --es id 0|1 ·
  * burn (fire the engine now, as a pinch during the flight does) ·
  * coach [--es id hints] (show the tutorial and every coaching hint again; hints: skip the slingshot tutorial) · guide --es id 0|1 (how-to-play card) ·
- * coachshot (fire the current level like a player: burn coaching slows the flight, no automatic burn)
+ * coachshot (fire the current level like a player: burn coaching slows the flight, no automatic burn) ·
+ * pull --es id sol|alt|off (hold the probe at a pull as a hand would; logs the aim line 1.5 s later)
  */
 object AutoPilot {
     const val ACTION = "com.vrgames.gravitysling.TEST"
@@ -65,6 +66,7 @@ object AutoPilot {
             "all" -> start(Levels.all.map { it.id })
             "level" -> if (Levels.all.any { it.id == id }) start(listOf(id!!)) else Log.w(TAG, "unknown level $id")
             "shot" -> shoot()
+            "pull" -> Game.requestDebugPull(id ?: "off")
             "miss" -> { frames = 0; frameTime = 0.0; worstFrame = 0.0; Game.requestAutoShot(miss = true) }
             "sky" -> Game.skyOn = id != "0"
             "nrm" -> id?.toFloatOrNull()?.let { Game.assets?.setNormalScale(it) }
