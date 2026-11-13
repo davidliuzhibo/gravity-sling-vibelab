@@ -57,6 +57,50 @@ object Game {
     /** Playfield height offset chosen by the player (meters). */
     var heightOffset by mutableStateOf(0f)
     var selectedCard by mutableStateOf<String?>(null)
+    /** 航天图鉴 is open in the scene (it used to be a system window, which opened too far away). */
+    var codexOpen by mutableStateOf(false); private set
+
+    fun openCodex() {
+        codexOpen = true
+        menuOpen = false
+        // The chosen card's model turns beside the panel.
+        if (showcase == null) showcase = selectedCard ?: progress().unlockedCards().firstOrNull()
+    }
+
+    fun closeCodex() {
+        codexOpen = false
+        showcase = null
+        narrate(null)
+    }
+    /** The card whose model stands large beside the player in the main scene ("放到身边看"), or null. */
+    var showcase by mutableStateOf<String?>(null)
+    /** The card whose narration is playing, or null. */
+    var narrating by mutableStateOf<String?>(null); private set
+    private var appContext: Context? = null
+    private var voice: android.media.MediaPlayer? = null
+
+    /** Plays card [id]'s narration (assets/narration/codex_<id>.ogg), stopping any other; null stops. */
+    fun narrate(id: String?) {
+        runCatching { voice?.release() }
+        voice = null
+        narrating = null
+        val ctx = appContext ?: return
+        if (id == null) return
+        voice = runCatching {
+            ctx.assets.openFd("narration/codex_$id.ogg").use { fd ->
+                android.media.MediaPlayer().apply {
+                    setDataSource(fd.fileDescriptor, fd.startOffset, fd.length)
+                    setOnCompletionListener { if (voice === it) narrating = null }
+                    prepare()
+                    start()
+                }
+            }
+        }.getOrNull()
+        if (voice != null) narrating = id
+    }
+
+    /** Every card of the encyclopedia found: the probe turns gold. */
+    val allCardsFound get() = progress().unlockedCards().toSet().size >= com.vrgames.gravitysling.core.Codex.cards.size
     /** Cards the last delivery unlocked for the first time (shown as a note in the console). */
     var newCards by mutableStateOf<List<String>>(emptyList())
     /** Bumps when the stage must put the probe back on the launcher (retry button). */
@@ -112,6 +156,7 @@ object Game {
 
     fun init(context: Context) {
         if (prefs != null) return
+        appContext = context.applicationContext
         val p = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         prefs = p
         synchronized(lock) {

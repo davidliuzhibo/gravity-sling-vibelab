@@ -2,6 +2,7 @@ package com.vrgames.gravitysling.core
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
@@ -192,13 +193,24 @@ class FeaturesTest {
     }
 
     @Test
+    fun everyCardHasItsShelfFiguresAndAKnownRoute() {
+        // Every shelf has cards; every card shows at least one figure; every stop of a route can be drawn.
+        Shelf.entries.forEach { assertTrue(it.title, Codex.onShelf(it).isNotEmpty()) }
+        Codex.cards.forEach { c ->
+            assertTrue(c.id, c.stats.isNotEmpty())
+            c.route.forEach { stop -> assertNotNull("${c.id} $stop", Route.ORBITS[stop]) }
+        }
+        assertEquals(37, Codex.cards.size)
+    }
+
+    @Test
     fun newCardsAreReportedOnlyTheFirstTime() {
         val s = GameSession()
         val sol = s.level.solution!!
         s.setPull(sol.pull)
         s.release()
         flyToEnd(s)
-        assertEquals(listOf("slingshot", "earth"), s.newCards)
+        assertEquals(listOf("slingshot", "earth", "cosmic_speed"), s.newCards)
         s.reset()
         s.setPull(sol.pull)
         s.release()

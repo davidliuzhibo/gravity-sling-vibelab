@@ -108,7 +108,7 @@ class GameSessionTest {
         assertFalse(p.record("1-1", 2))
         assertTrue(p.record("1-2", 2))
         assertEquals("1-1:3,1-2:2", p.serialize())
-        assertEquals(listOf("slingshot", "earth", "moon"), p.unlockedCards())
+        assertEquals(listOf("slingshot", "earth", "cosmic_speed", "moon", "lunar_sample"), p.unlockedCards())
     }
 
     @Test

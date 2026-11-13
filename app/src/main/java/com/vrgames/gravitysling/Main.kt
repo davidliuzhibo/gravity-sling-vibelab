@@ -27,7 +27,7 @@ fun mainApp(scope: SpatialAppScope) =
         WindowContainer(CONSOLE_ID, Form.Planar, { defaultSize = WindowContainerSize(680.dp, 1000.dp) }) {
             PicoTheme { ConsoleWindow() }
         }
-        WindowContainer(CODEX_ID, Form.Volumetric, { defaultSize = WindowContainerSize(0.9f, 0.55f, 0.4f, LengthUnit.Meters) }) {
+        WindowContainer(CODEX_ID, Form.Volumetric, { defaultSize = WindowContainerSize(1.1f, 0.62f, 0.4f, LengthUnit.Meters) }) {
             PicoTheme { CodexWindow() }
         }
     }

@@ -74,6 +74,8 @@ object AutoPilot {
             "stop" -> stop()
             "mute" -> mute(id.orEmpty())
             "view" -> Game.debugView = id?.takeIf { it != "reset" }
+            "card" -> { Game.selectedCard = id; Game.narrate(id) }
+            "showcase" -> Game.showcase = id?.takeIf { it != "off" }
             "slow" -> Game.timeScale = id?.toDoubleOrNull() ?: 1.0
             "ibl" -> id?.toFloatOrNull()?.let { Game.lighting?.exponent = it }
             "sun" -> sun(id.orEmpty())

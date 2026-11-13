@@ -24,6 +24,9 @@ import com.vrgames.gravitysling.core.BodySpec
  * releases a resource together with the entity that owns it, and a level rebuild destroys the
  * previous level's entities.
  */
+/** Encyclopedia models that come as files (assets/models/codex/<key>.glb). */
+val CODEX_MODELS = setOf("dish_probe", "sun_probe", "wing_probe", "capsule", "rover")
+
 class Assets {
     val unitSphere: MeshResource = MeshResource.createSphere(1f).shared()
     val dotMesh: MeshResource = MeshResource.createSphere(0.006f).shared()
@@ -147,6 +150,8 @@ class Assets {
             "earth" -> Triple("earth", color(1f, 1f, 1f), 0.8f)
             "mars" -> Triple("mars", color(1f, 1f, 1f), 0.9f)
             "jupiter" -> Triple("jupiter", color(1f, 1f, 1f), 0.7f)
+            "venus" -> Triple("venus", color(1f, 1f, 1f), 0.8f)
+            "saturn" -> Triple("saturn", color(1f, 1f, 1f), 0.75f)
             "phobos", "deimos" -> Triple("moon", color(0.75f, 0.6f, 0.5f), 0.95f)
             "io" -> Triple("moon", color(1f, 0.9f, 0.45f), 0.9f)
             "europa" -> Triple("moon", color(0.95f, 0.9f, 0.8f), 0.6f)
@@ -238,6 +243,11 @@ class Assets {
         }
     }
 
+    private val goldMaterial by lazy { pbr(color(1f, 0.78f, 0.32f), metallic = 1f, roughness = 0.22f, emissive = color(0.18f, 0.12f, 0.02f)).shared() }
+
+    /** Turns [e] (a probe) to gold: the reward for a full encyclopedia. */
+    fun gild(e: Entity) = setMaterials(e, goldMaterial)
+
     private fun setMaterials(e: Entity, m: com.pico.spatial.core.ecs.resource.Material) {
         e.components[ModelComponent::class.java]?.materials?.let { mats -> for (i in 0 until mats.size) mats[i] = m }
         e.getChildren().forEach { setMaterials(it, m) }
@@ -288,8 +298,93 @@ class Assets {
         "wormhole" -> newPortal(0.12f, true).apply { transform().eulerAngles = EulerAngles(70f, 0f, 0f) }
         "asteroid" -> newBodyVisual(BodySpec("a", "", BodyKind.ASTEROID, com.vrgames.gravitysling.core.Vec3.ZERO, 0.09, 0.0))
         "gravity_ball" -> newBodyVisual(BodySpec("b", "", BodyKind.GRAVITY_BALL, com.vrgames.gravitysling.core.Vec3.ZERO, 0.1, 0.0))
-        "earth", "mars", "jupiter" -> newBodyVisual(BodySpec(key, "", BodyKind.PLANET, com.vrgames.gravitysling.core.Vec3.ZERO, 0.13, 0.0, look = key))
+        "earth", "mars", "jupiter", "venus" -> newBodyVisual(BodySpec(key, "", BodyKind.PLANET, com.vrgames.gravitysling.core.Vec3.ZERO, 0.13, 0.0, look = key))
+        "saturn" -> newSaturn(0.1f).apply { transform().eulerAngles = EulerAngles(20f, 0f, 8f) }
+        "sun" -> newSun(0.13f)
+        "comet" -> newComet()
+        "sail" -> newSail()
+        in CODEX_MODELS -> codexTemplates[key]?.clone(Entity.CloneOptions(true, true))
         else -> newBodyVisual(BodySpec(key, "", BodyKind.MOON, com.vrgames.gravitysling.core.Vec3.ZERO, 0.12, 0.0, look = key))
+    }
+
+    // ---- The encyclopedia's newer models (2026-11-12) ----
+
+    /** Original spacecraft for the journey cards (Seed3D, see docs/素材来源); loaded when first shown. */
+    private val codexTemplates = java.util.concurrent.ConcurrentHashMap<String, Entity>()
+
+    /** Loads model [key] of [CODEX_MODELS] once (main thread, suspending); true when it can be shown. */
+    suspend fun loadCodexModel(key: String): Boolean {
+        if (key !in CODEX_MODELS) return true
+        if (codexTemplates.containsKey(key)) return true
+        val e = runCatching { Entity.loadSuspend("asset://models/codex/$key.glb") }.getOrNull() ?: return false
+        shareResources(e)
+        codexTemplates[key] = e
+        return true
+    }
+
+    private val sunMaterial by lazy { unlit(color(1f, 1f, 1f)).apply { setBaseColorTexture(texture("textures/sun.jpg")) }.shared() }
+    private val sunHalo by lazy { listOf(rim(color(1f, 0.7f, 0.25f, 0.6f)), rim(color(1f, 0.55f, 0.15f, 0.25f))).map { it.shared() } }
+
+    /** The sun: its own light (unlit), with a warm corona. */
+    fun newSun(r: Float) = Entity().apply {
+        addChild(model(unitSphere, sunMaterial).apply { setScale(r) })
+        sunHalo.forEachIndexed { i, m -> addChild(model(unitSphere, m).apply { setScale(r * (1.04f + 0.08f * i)) }) }
+    }
+
+    private val ringMaterial by lazy {
+        pbr(color(1f, 1f, 1f), roughness = 0.8f, blending = BlendingMode.TRANSPARENT).apply {
+            setBaseColorTexture(texture("textures/saturn_ring.png"))
+            setCullingMode(MaterialCullingMode.NONE)
+        }.shared()
+    }
+    private val ringMesh by lazy { annulus(1.24f, 2.3f, 96).shared() }
+
+    /** Saturn: the banded globe and its ring (a flat band textured across its width). */
+    fun newSaturn(r: Float) = Entity().apply {
+        addChild(newBodyVisual(BodySpec("saturn", "", BodyKind.PLANET, com.vrgames.gravitysling.core.Vec3.ZERO, r.toDouble(), 0.0, look = "saturn")))
+        addChild(model(ringMesh, ringMaterial).apply { setScale(r) })
+    }
+
+    /** A flat ring from [inner] to [outer] in the xz plane; u runs from the inner edge to the outer. */
+    private fun annulus(inner: Float, outer: Float, seg: Int): MeshResource {
+        val pos = ArrayList<Vector3>(); val nor = ArrayList<Vector3>(); val tan = ArrayList<com.pico.spatial.core.math.Vector4>(); val uv = ArrayList<com.pico.spatial.core.math.Vector2>()
+        val idx = ArrayList<Int>()
+        for (i in 0..seg) {
+            val a = 2 * Math.PI * i / seg
+            val c = kotlin.math.cos(a).toFloat(); val sn = kotlin.math.sin(a).toFloat()
+            for ((k, rr) in listOf(inner, outer).withIndex()) {
+                pos += Vector3(rr * c, 0f, rr * sn); nor += Vector3(0f, 1f, 0f)
+                tan += com.pico.spatial.core.math.Vector4(-sn, 0f, c, 1f); uv += com.pico.spatial.core.math.Vector2(k.toFloat(), 0.5f)
+            }
+        }
+        for (i in 0 until seg) {
+            val a = i * 2; val b = a + 1; val c = a + 2; val d = a + 3
+            idx += listOf(a, c, b, b, c, d)
+        }
+        return MeshResource.createWithMeshModel(com.pico.spatial.core.ecs.resource.MeshModel(pos, idx, nor, tan, uv), null, "saturn_ring")
+    }
+
+    private val cometTail by lazy { glow(color(0.55f, 0.85f, 1f, 0.35f)).shared() }
+    private val cometDust by lazy { glow(color(1f, 0.9f, 0.7f, 0.25f)).shared() }
+
+    /** A comet: a dark icy nucleus and a long tail of fading glow (pointing away from where the sun would be). */
+    fun newComet() = Entity().apply {
+        addChild(newRock("comet", 0.06f))
+        for (k in 1..14) {
+            val t = k / 14f
+            addChild(model(unitSphere, cometTail).apply { setScale(0.05f * (1f + 1.6f * t)); setPos(Vector3(0.05f + 0.32f * t, 0.01f * t, 0f)) })
+            addChild(model(unitSphere, cometDust).apply { setScale(0.03f * (1f + t)); setPos(Vector3(0.04f + 0.26f * t, -0.05f * t * t, 0f)) })
+        }
+    }
+
+    private val sailMaterial by lazy { pbr(color(0.95f, 0.85f, 0.55f), metallic = 1f, roughness = 0.15f).apply { setCullingMode(MaterialCullingMode.NONE) }.shared() }
+
+    /** A square solar sail on four booms round a small hub. */
+    fun newSail() = Entity().apply {
+        val boom = pbr(color(0.85f, 0.85f, 0.88f), metallic = 0.6f, roughness = 0.4f)
+        addChild(model(MeshResource.createBox(Vector3(0.3f, 0.0008f, 0.3f)), sailMaterial).apply { transform().eulerAngles = EulerAngles(80f, 45f, 0f) })
+        addChild(model(MeshResource.createCylinder(0.04f, 0.035f), pbr(color(0.8f, 0.65f, 0.3f), metallic = 0.9f, roughness = 0.3f)).apply { transform().eulerAngles = EulerAngles(80f, 45f, 0f) })
+        for (k in 0 until 2) addChild(model(MeshResource.createBox(Vector3(0.43f, 0.004f, 0.004f)), boom).apply { transform().eulerAngles = EulerAngles(80f, 45f + 90f * k, 0f) })
     }
 
     fun newStar(): Entity = Entity().apply {

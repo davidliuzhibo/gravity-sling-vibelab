@@ -114,6 +114,9 @@ class Playfield(private val assets: Assets) {
     var ballIntroUp = false
     /** Set by the stage while the level's mission card should show. */
     var levelCardUp = false
+    /** 航天图鉴 open in front of the player: the other cards step aside while it is up. */
+    var codexUp = false
+    private var codexLabel: Entity? = null
     /** Called (render thread) when the aim line starts or stops reaching the station. */
     var onAimGold: ((Boolean) -> Unit)? = null
     /** Called (render thread) when the note over a dragged ball changes: why it cannot sit there, or null. */
@@ -190,6 +193,15 @@ class Playfield(private val assets: Assets) {
     private val pullHistory = ArrayDeque<Pair<Long, Vec3>>()
     private var ballDragPos = Vec3.ZERO
 
+    private var gilded = false
+
+    /** The encyclopedia is complete: 小驿号 is gold from now on. */
+    fun gildProbe() {
+        if (gilded) return
+        gilded = true
+        probe.getChildren().firstOrNull()?.let { assets.gild(it) }
+    }
+
     init {
         probe.addChild(assets.newProbeVisual())
         probe.components.set(
@@ -239,7 +251,7 @@ class Playfield(private val assets: Assets) {
      * Takes the stage's coaching label panels (any still null are taken on a later call); they
      * stay hidden until their coaching is due.
      */
-    fun attachLabels(burn: Entity?, ball: Entity?, map: Entity?, intro: Entity?, pull: Entity?, result: Entity?, menu: Entity?, ballIntro: Entity?, level: Entity?, miss: Entity?) {
+    fun attachLabels(burn: Entity?, ball: Entity?, map: Entity?, intro: Entity?, pull: Entity?, result: Entity?, menu: Entity?, ballIntro: Entity?, level: Entity?, miss: Entity?, codex: Entity? = null) {
         fun take(e: Entity?, old: Entity?): Entity? {
             if (e == null || old != null) return old
             e.enabled = false
@@ -256,6 +268,7 @@ class Playfield(private val assets: Assets) {
         ballIntroLabel = take(ballIntro, ballIntroLabel)
         levelLabel = take(level, levelLabel)
         missLabel = take(miss, missLabel)
+        codexLabel = take(codex, codexLabel)
         fit(com.vrgames.gravitysling.content.LABEL_INTRO, introLabel)
         fit(com.vrgames.gravitysling.content.LABEL_RESULT, resultLabel)
         fit(com.vrgames.gravitysling.content.LABEL_BALL_INTRO, ballIntroLabel)
@@ -914,28 +927,32 @@ class Playfield(private val assets: Assets) {
             if (pullOn) it.setPos(lv.launch + LABEL_OVER_LAUNCHER)
         }
         resultLabel?.let {
-            val on = resultUp && !titleUp
+            val on = resultUp && !titleUp && !codexUp
             showIf(it, on)
             if (on) it.setPos(SIDE_CARD_POS)
         }
         ballIntroLabel?.let {
-            val on = ballIntroUp && !titleUp && session.phase == Phase.AIMING
+            val on = ballIntroUp && !titleUp && !codexUp && session.phase == Phase.AIMING
             showIf(it, on)
             if (on) it.setPos(INTRO_PANEL_POS)
         }
         levelLabel?.let {
-            val on = levelCardUp && !missUp && !titleUp && !ballIntroUp && session.phase == Phase.AIMING
+            val on = levelCardUp && !missUp && !titleUp && !ballIntroUp && !codexUp && session.phase == Phase.AIMING
             showIf(it, on)
             if (on) it.setPos(SIDE_CARD_POS)
         }
         missLabel?.let {
-            val on = missUp && !titleUp && dragging == null
+            val on = missUp && !titleUp && !codexUp && dragging == null
             showIf(it, on)
             if (on) it.setPos(SIDE_CARD_POS)
         }
         menuLabel?.let {
             showIf(it, !titleUp)
             if (!titleUp) it.setPos(MENU_POS)
+        }
+        codexLabel?.let {
+            showIf(it, codexUp && !titleUp)
+            if (codexUp && !titleUp) it.setPos(CODEX_POS)
         }
         probeShown = probeShown // re-applies the title-card hiding
 
@@ -1014,6 +1031,10 @@ class Playfield(private val assets: Assets) {
         private val SIDE_CARD_POS = Vec3(0.36, 0.02, 0.28)
         /** The menu tab: low on the left, beside the launcher, within reach. */
         private val MENU_POS = Vec3(-0.42, -0.2, 0.3)
+        /** 航天图鉴: straight ahead about 0.8 m from the eyes, half as far as the system window used to open. */
+        private val CODEX_POS = Vec3(0.06, 0.06, 0.2)
+        /** The codex card's model, turning to the left of the panel. */
+        val CODEX_MODEL_POS = Vec3(-0.5, 0.02, 0.18)
         /** Pinch target around the probe: generous, so the eye-hand pinch finds it easily. */
         private const val PROBE_GRAB_RADIUS = 0.09f
         private val LABEL_OVER_MAP = Vec3(0.0, 0.2, 0.0)

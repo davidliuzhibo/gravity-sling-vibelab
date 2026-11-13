@@ -72,7 +72,7 @@ object Levels {
             bodies = listOf(earth(v(-0.8, -0.4, -0.3)), moon(v(0.35, 0.05, -0.55))),
             pull = v(0.02, -0.04, 0.17),
             goalTime = 3.2, starTimes = listOf(0.9, 1.7, 2.5),
-            unlocks = listOf("slingshot", "earth"),
+            unlocks = listOf("slingshot", "earth", "cosmic_speed"),
         ),
         authored(
             id = "1-2", chapter = 1, number = 2, title = "月影",
@@ -81,7 +81,7 @@ object Levels {
             bodies = listOf(earth(v(-0.85, -0.35, -0.1)), moon(v(0.0, 0.0, -0.55), r = 0.1, mu = 0.03)),
             pull = v(-0.08, 0.0, 0.12),
             goalTime = 3.7, starTimes = listOf(1.1, 2.0, 2.9),
-            unlocks = listOf("moon"),
+            unlocks = listOf("moon", "lunar_sample"),
         ),
         authored(
             id = "1-3", chapter = 1, number = 3, title = "借力",
@@ -97,7 +97,7 @@ object Levels {
             pull = v(0.0, -0.04, 0.17),
             placements = mapOf("ball1" to v(0.4, -0.1, -0.2)),
             goalTime = 2.4, starTimes = listOf(0.72, 1.44, 2.04),
-            unlocks = listOf("gravity_ball"),
+            unlocks = listOf("gravity_ball", "sun"),
         ),
         authored(
             id = "1-4", chapter = 1, number = 4, title = "月背中继",
@@ -122,7 +122,7 @@ object Levels {
             ),
             pull = v(-0.058, -0.028, 0.148),
             goalTime = 2.8, starTimes = listOf(0.7, 1.4, 2.1),
-            unlocks = listOf("assist"),
+            unlocks = listOf("assist", "hohmann"),
         ),
         authored(
             id = "1-6", chapter = 1, number = 6, title = "追站", challenge = true,
@@ -136,7 +136,7 @@ object Levels {
             placements = mapOf("ball1" to v(0.208, 0.198, -0.699)),
             goalTime = 3.25, starTimes = listOf(0.9, 1.8, 2.6), goalRadius = 0.085,
             goalAround = v(0.0, -0.1, -0.6), goalPeriod = -7.0,
-            unlocks = listOf("station"),
+            unlocks = listOf("station", "solar_sail"),
         ),
     )
 
@@ -153,7 +153,7 @@ object Levels {
                 belt(-0.42, -0.208 to 0.09, 0.13, frange(-0.7, 0.25, 7), frange(-0.45, 0.45, 6), seed = 3),
             pull = v(0.05, -0.05, 0.15),
             goalTime = 3.3, starTimes = listOf(0.9, 1.8, 2.6), goalRadius = 0.09,
-            unlocks = listOf("mars", "probe_family"),
+            unlocks = listOf("mars", "probe_family", "mars_trio"),
         ),
         authored(
             id = "2-2", chapter = 2, number = 2, title = "加速环",
@@ -163,7 +163,7 @@ object Levels {
             boosters = listOf(booster(-0.041, -0.132, 0.25, 1.8)),
             pull = v(0.0326, 0.0092, 0.0624),
             goalTime = 3.57, starTimes = listOf(1.0, 2.0, 2.9), goalRadius = 0.1,
-            unlocks = listOf("booster"),
+            unlocks = listOf("booster", "oberth"),
         ),
         authored(
             id = "2-3", chapter = 2, number = 3, title = "双卫",
@@ -176,7 +176,7 @@ object Levels {
             ),
             pull = v(0.047, -0.054, 0.137),
             goalTime = 2.82, starTimes = listOf(0.85, 1.55, 2.25), goalRadius = 0.09,
-            unlocks = listOf("mars_moons"),
+            unlocks = listOf("mars_moons", "venus"),
         ),
         authored(
             id = "2-4", chapter = 2, number = 4, title = "穿针",
@@ -189,7 +189,7 @@ object Levels {
             pull = v(-0.065, 0.034, 0.126),
             placements = mapOf("ball1" to v(0.218, -0.258, -0.711)),
             goalTime = 3.33, starTimes = listOf(0.9, 1.8, 2.45), goalRadius = 0.09,
-            unlocks = listOf("asteroid"),
+            unlocks = listOf("asteroid", "comet"),
         ),
         authored(
             id = "2-5", chapter = 2, number = 5, title = "火星快线",
@@ -203,7 +203,7 @@ object Levels {
             pull = v(-0.0711, -0.0267, 0.065),
             goalTime = 6.875, starTimes = listOf(1.2, 2.6, 5.2), checkpointTimes = listOf(3.61),
             goalRadius = 0.12, checkpointRadius = 0.14,
-            unlocks = listOf("window"),
+            unlocks = listOf("window", "sample_return"),
         ),
         authored(
             id = "2-6", chapter = 2, number = 6, title = "弹弓失灵", challenge = true, maxPull = 0.1,
@@ -212,7 +212,7 @@ object Levels {
             bodies = listOf(mars(v(0.05, -0.1, -0.45), r = 0.15, mu = 0.12)),
             pull = v(-0.076, 0.056, -0.007), burnAt = 2.69,
             goalTime = 4.75, starTimes = listOf(1.2, 2.4, 3.6), goalRadius = 0.1,
-            unlocks = listOf("correction"),
+            unlocks = listOf("correction", "comet_chaser"),
         ),
     )
 
@@ -228,7 +228,7 @@ object Levels {
             bodies = listOf(jupiter(v(0.1, -0.05, -0.8), 0.24, 0.07), spareBall()),
             pull = v(-0.077, -0.051, 0.085),
             goalTime = 3.6, starTimes = listOf(1.0, 2.0, 2.9), goalRadius = 0.09,
-            unlocks = listOf("jupiter"),
+            unlocks = listOf("jupiter", "jupiter_polar"),
         ),
         authored(
             id = "3-2", chapter = 3, number = 2, title = "虫洞",
@@ -252,7 +252,7 @@ object Levels {
             ),
             pull = v(0.072, -0.044, 0.144),
             goalTime = 2.78, starTimes = listOf(0.8, 1.5, 2.2), goalRadius = 0.09,
-            unlocks = listOf("galilean"),
+            unlocks = listOf("galilean", "saturn"),
         ),
         authored(
             id = "3-4", chapter = 3, number = 4, title = "双球",
@@ -266,7 +266,7 @@ object Levels {
             pull = v(0.095, 0.027, 0.093),
             placements = mapOf("ball1" to v(-0.186, -0.19, -0.327), "ball2" to v(0.239, -0.056, -1.017)),
             goalTime = 3.55, starTimes = listOf(1.0, 2.0, 2.9), goalRadius = 0.08,
-            unlocks = listOf("three_body"),
+            unlocks = listOf("three_body", "ring_planet"),
         ),
         authored(
             id = "3-5", chapter = 3, number = 5, title = "回家",
@@ -278,7 +278,7 @@ object Levels {
             pull = v(-0.0014, 0.0472, 0.0505),
             goalTime = 5.93, starTimes = listOf(1.5, 3.0, 4.2), checkpointTimes = listOf(4.82),
             goalRadius = 0.11, checkpointRadius = 0.13,
-            unlocks = listOf("deep_space"),
+            unlocks = listOf("deep_space", "grand_tour"),
         ),
         authored(
             id = "3-6", chapter = 3, number = 6, title = "近木点火", challenge = true, maxPull = 0.1,
@@ -290,7 +290,7 @@ object Levels {
             ),
             pull = v(0.072, 0.053, 0.040), burnAt = 0.87,
             goalTime = 5.75, starTimes = listOf(1.6, 3.0, 4.4), goalRadius = 0.1,
-            unlocks = listOf("scale"),
+            unlocks = listOf("scale", "sun_dive", "pluto_flyby"),
         ),
     )
 

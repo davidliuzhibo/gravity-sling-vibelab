@@ -190,7 +190,7 @@ private fun MissionControl() {
             Button(onClick = { Game.heightOffset += 0.1f }) { Text("升高") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { navigator.openWindowContainer(CODEX_ID) }) { Text("打开航天图鉴") }
+            Button(onClick = { Game.openCodex() }) { Text("打开航天图鉴") }
         }
     }
 }
@@ -255,7 +255,7 @@ private fun NewCardNote(ids: List<String>) {
         cards.forEach { Text("· ${it.fact}", fontSize = 19.sp) }
         Button(onClick = {
             Game.selectedCard = cards.first().id
-            navigator.openWindowContainer(CODEX_ID)
+            Game.openCodex()
         }) { Text("打开图鉴看看") }
     }
 }
@@ -290,7 +290,7 @@ private fun CelebrationCard(c: Game.Celebration) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             val next = Levels.all.firstOrNull { it.chapter == c.chapter + 1 }
             if (!c.allDone && next != null) Button(onClick = { Game.selectLevel(next.id) }) { Text("前往下一章 →") }
-            Button(onClick = { navigator.openWindowContainer(CODEX_ID) }) { Text("看看图鉴") }
+            Button(onClick = { Game.openCodex() }) { Text("看看图鉴") }
             Button(onClick = { Game.dismissCelebration() }) { Text("关闭") }
         }
     }

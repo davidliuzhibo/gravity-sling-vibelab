@@ -28,6 +28,7 @@ import com.pico.spatial.core.ecs.TransformComponent
 import com.pico.spatial.core.ecs.event.SceneEvents
 import com.pico.spatial.core.lifecycle.Cancellable
 import com.pico.spatial.core.math.EulerAngles
+import com.pico.spatial.core.math.Vector3
 import com.pico.spatial.ui.foundation.content.SpatialView
 import com.pico.spatial.ui.foundation.content.SpatialViewAttachments
 import com.pico.spatial.ui.foundation.content.toColor4
@@ -68,6 +69,8 @@ fun GameStage() {
     var playfield by remember { mutableStateOf<Playfield?>(null) }
     var sky by remember { mutableStateOf<Entity?>(null) }
     val subscription = remember { arrayOfNulls<Cancellable>(1) }
+    val showcase = remember { arrayOfNulls<Entity>(1) }
+    val showcaseYaw = remember { floatArrayOf(0f) }
     val main = remember { Handler(Looper.getMainLooper()) }
     val grabbingProbe = remember { booleanArrayOf(false) }
     // Last gesture callback (uptime ms), for the stuck-gesture check in the frame loop.
@@ -101,6 +104,8 @@ fun GameStage() {
             // Home hides the stage but not the windows it opened: close them and fold the menu when the game is no
             // longer seen at all (ON_STOP, not ON_PAUSE, which a window of our own opening also causes).
             if (e == Lifecycle.Event.ON_STOP) {
+                // The codex narration stops too (device test 2026-11-12 in 掌心星球: a voice kept talking after Home).
+                Game.narrate(null)
                 Game.menuOpen = false
                 runCatching { navigator.closeWindowContainer(CONSOLE_ID) }
                 runCatching { navigator.closeWindowContainer(CODEX_ID) }
@@ -109,6 +114,7 @@ fun GameStage() {
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
+            Game.narrate(null)
             music.release()
             Game.music = null
         }
@@ -168,6 +174,27 @@ fun GameStage() {
     }
     // The title card floats in front of the player; the probe waits until it is dismissed.
     LaunchedEffect(Game.showTitle, playfield) { playfield?.titleUp = Game.showTitle }
+    LaunchedEffect(Game.progressVersion, playfield) { if (Game.allCardsFound) playfield?.gildProbe() }
+    // "放到身边看": the chosen card's model, three times its window size, turning beside the player.
+    LaunchedEffect(Game.codexOpen, playfield) { playfield?.codexUp = Game.codexOpen }
+    LaunchedEffect(Game.showcase, Game.codexOpen, playfield) {
+        val pf = playfield ?: return@LaunchedEffect
+        showcase[0]?.let { pf.root.removeChild(it) }
+        showcase[0] = null
+        val card = Game.showcase?.let { com.vrgames.gravitysling.core.Codex.byId(it) } ?: return@LaunchedEffect
+        val assets = Game.assets ?: return@LaunchedEffect
+        if (!assets.loadCodexModel(card.model)) return@LaunchedEffect
+        val model = assets.newCodexModel(card.model) ?: return@LaunchedEffect
+        val holder = Entity().apply { addChild(model) }
+        holder.components[TransformComponent::class.java]?.apply {
+            // Beside the codex panel when it is open; otherwise at the side of the field, as before.
+            val at = if (Game.codexOpen) com.vrgames.gravitysling.render.Playfield.CODEX_MODEL_POS else com.vrgames.gravitysling.core.Vec3(-0.5, 0.12, -0.42)
+            setPosition(Vector3(at.x.toFloat(), at.y.toFloat(), at.z.toFloat()))
+            setScaleVector(Vector3(if (Game.codexOpen) 1.6f else 2.4f))
+        }
+        pf.root.addChild(holder)
+        showcase[0] = holder
+    }
     LaunchedEffect(Game.coachBall, Game.ballIntroDismissed, playfield) {
         playfield?.ballIntroUp = Game.coachBall && !Game.ballIntroDismissed
     }
@@ -260,11 +287,12 @@ fun GameStage() {
             AttachmentPanel(LABEL_BALL_INTRO) { BallIntroPanel(converter) }
             AttachmentPanel(LABEL_LEVEL) { LevelCard(converter) }
             AttachmentPanel(LABEL_MISS) { MissPanel(converter) }
+            AttachmentPanel(LABEL_CODEX) { if (Game.codexOpen) CodexPanel(converter) }
             AttachmentPanel(LABEL_MENU) {
                 MenuPanel(
                     converter,
                     openConsole = { navigator.openWindowContainer(CONSOLE_ID) },
-                    openCodex = { navigator.openWindowContainer(CODEX_ID) },
+                    openCodex = { Game.openCodex() },
                     quit = { context.findActivity()?.finishAndRemoveTask() },
                 )
             }
@@ -350,6 +378,10 @@ fun GameStage() {
                         main.post { if (pf.isDragging) endDrag(pf, grabbingProbe, "fingers-open") }
                     }
                 }
+                showcase[0]?.components?.get(TransformComponent::class.java)?.let { t ->
+                    showcaseYaw[0] = (showcaseYaw[0] + e.deltaTime * 25f) % 360f
+                    t.eulerAngles = EulerAngles(10f, showcaseYaw[0], 0f)
+                }
                 val (changed, phase) = synchronized(Game.lock) {
                     pf.frame(e.deltaTime.toDouble() * Game.timeScale, Game.session) to Game.session.phase
                 }
@@ -366,7 +398,7 @@ private fun attachLabels(pf: Playfield, attachments: SpatialViewAttachments) {
         attachments.entity(LABEL_BURN), attachments.entity(LABEL_BALL), attachments.entity(LABEL_MAP),
         attachments.entity(LABEL_INTRO), attachments.entity(LABEL_PULL),
         attachments.entity(LABEL_RESULT), attachments.entity(LABEL_MENU), attachments.entity(LABEL_BALL_INTRO), attachments.entity(LABEL_LEVEL),
-        attachments.entity(LABEL_MISS),
+        attachments.entity(LABEL_MISS), attachments.entity(LABEL_CODEX),
     )
 }
 
