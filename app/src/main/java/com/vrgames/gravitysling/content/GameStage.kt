@@ -77,18 +77,26 @@ fun GameStage() {
     val lastInput = remember { longArrayOf(0L) }
     // Hand tracking, to see the fingers open even when the system never ends the drag.
     val hands = remember { HandTrackingProvider() }
+    // The headset, for the eye height the playfield is set from.
+    val head = remember { com.pico.spatial.tracking.hmd.HMDTrackingProvider() }
     // The hand that pinched the current drag (0 left, 1 right, -1 unknown) and open frames seen.
     val pinch = remember { intArrayOf(-1, 0) }
     val backdrop = remember { arrayOfNulls<Entity>(1) }
 
+    com.vrgames.gravitysling.platform.AppExit.TrackStage()
     DisposableEffect(Unit) {
         // The windows wait in the scene menu: the title, mission and result cards cover a run,
         // and two windows open at once crowd the view.
         Game.init(context)
+        com.vrgames.gravitysling.platform.AppExit.stageAlive = true
         val started = runCatching { hands.start() }
         Log.i(INPUT_TAG, "hand tracking ${started.getOrNull() ?: started.exceptionOrNull()?.message} support=${runCatching { hands.supportState }.getOrNull()}")
+        val headStarted = runCatching { head.start() }
+        Log.i("GravityPlace", "head tracking ${headStarted.getOrNull() ?: headStarted.exceptionOrNull()?.message}")
         onDispose {
+            com.vrgames.gravitysling.platform.AppExit.stageAlive = false
             runCatching { hands.stop() }
+            runCatching { head.stop() }
             subscription[0]?.cancel()
             navigator.closeWindowContainer(CONSOLE_ID)
             navigator.closeWindowContainer(CODEX_ID)
@@ -137,6 +145,7 @@ fun GameStage() {
         kotlinx.coroutines.delay(1500)
         Log.i("GravityTest", "aim after pull $mode: ${synchronized(Game.lock) { pf.debugAim() }} full=${Game.fullPreview}")
     }
+    DisposableEffect(Unit) { onDispose { Game.autoShotNow = null } }
     LaunchedEffect(Game.autoShotVersion) {
         val pf = playfield ?: return@LaunchedEffect
         if (Game.autoShotVersion == 0) return@LaunchedEffect
@@ -212,10 +221,28 @@ fun GameStage() {
         playfield?.coachBall = Game.coachBall
         playfield?.coachMap = Game.coachMap
     }
-    LaunchedEffect(Game.heightOffset, playfield, Game.debugView) {
+    LaunchedEffect(Game.heightOffset, playfield, Game.debugView, Game.eyeY) {
         val pf = playfield ?: return@LaunchedEffect
         val v = Game.debugView?.split(",")?.mapNotNull { it.trim().toFloatOrNull() }
-        if (v != null && v.size == 5) pf.debugPose(v[0], v[1], v[2], v[3], v[4]) else pf.placeInRoom(Game.heightOffset)
+        if (v != null && v.size == 5) pf.debugPose(v[0], v[1], v[2], v[3], v[4]) else pf.placeInRoom(Game.heightOffset, Game.eyeY)
+    }
+    // v2.3.1: measure the eyes (EyeHeight ignores the all-zero poses a headset reports while tracking starts, waits for
+    // steady readings, falls back to a seated eye and corrects once). The playfield follows Game.eyeY, set once.
+    LaunchedEffect(playfield, Game.placeRequest) {
+        if (playfield == null) return@LaunchedEffect
+        val eyes = com.vrgames.gravitysling.core.EyeHeight()
+        val step = 50L
+        val zeroUntil = android.os.SystemClock.uptimeMillis() + (Game.debugZeroHeadS * 1000).toLong()
+        while (eyes.listening) {
+            val zero = android.os.SystemClock.uptimeMillis() < zeroUntil
+            val p = if (zero) null else runCatching { if (head.state == DataProvider.State.STARTED) head.latestData?.hmdPose else null }.getOrNull()
+            val got = if (zero) eyes.feed(0f, 0f, 0f, step / 1000.0) else eyes.feed(p?.position?.x, p?.position?.y, p?.position?.z, step / 1000.0)
+            if (got) {
+                Game.eyeY = eyes.value!!
+                Log.i("GravityPlace", "eyes at ${Game.eyeY} (${if (eyes.guessed) "fallback" else "measured"}): playfield centre at ${Game.eyeY - com.vrgames.gravitysling.render.Playfield.BELOW_EYE + Game.heightOffset}")
+            }
+            kotlinx.coroutines.delay(step)
+        }
     }
 
     SpatialView(
@@ -293,7 +320,7 @@ fun GameStage() {
                     converter,
                     openConsole = { navigator.openWindowContainer(CONSOLE_ID) },
                     openCodex = { Game.openCodex() },
-                    quit = { context.findActivity()?.finishAndRemoveTask() },
+                    quit = { com.vrgames.gravitysling.platform.AppExit.finishAll(context) },
                 )
             }
         },
@@ -343,7 +370,7 @@ fun GameStage() {
 
             val pf = Playfield(assets)
             pf.lighting = lighting
-            pf.placeInRoom(Game.heightOffset)
+            pf.placeInRoom(Game.heightOffset, Game.eyeY)
             content.addEntity(pf.root)
             lighting.receive(pf.root)
             backdrop[0]?.let { lighting.receive(it) }
@@ -359,6 +386,12 @@ fun GameStage() {
             pf.onBallNotice = { text -> main.post { Game.ballNotice = text } }
             attachLabels(pf, attachments)
             playfield = pf
+            // Debug: the auto shot fired straight from here (see Game.autoShotNow).
+            Game.autoShotNow = { miss, coached ->
+                val fired = synchronized(Game.lock) { pf.autoShot(Game.session, miss, coached) }
+                Game.refresh()
+                AutoPilot.onShot(fired)
+            }
 
             subscription[0] = content.subscribe(SceneEvents.Update::class.java) { e ->
                 AutoPilot.onFrame(e.deltaTime.toDouble())

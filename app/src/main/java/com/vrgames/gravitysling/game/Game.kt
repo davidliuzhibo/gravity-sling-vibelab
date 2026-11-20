@@ -56,6 +56,12 @@ object Game {
     var levelVersion by mutableIntStateOf(0); private set
     /** Playfield height offset chosen by the player (meters). */
     var heightOffset by mutableStateOf(0f)
+    /** The measured eye height (core.EyeHeight); the seated default until the headset has answered. */
+    var eyeY by mutableStateOf(com.vrgames.gravitysling.render.Playfield.BASE_HEIGHT + com.vrgames.gravitysling.render.Playfield.BELOW_EYE)
+    /** Bumped to measure the eyes again (debug hook "replace"). */
+    var placeRequest by mutableStateOf(0)
+    /** Debug only: the head reads all zeros this many seconds into a measurement, as a device can right after start. */
+    var debugZeroHeadS = 0.0
     var selectedCard by mutableStateOf<String?>(null)
     /** 航天图鉴 is open in the scene (it used to be a system window, which opened too far away). */
     var codexOpen by mutableStateOf(false); private set
@@ -207,7 +213,11 @@ object Game {
         debugPullVersion++
     }
 
+    /** Debug: the stage's way to fire the auto shot at once (the effect below waits for a recomposition, which a backgrounded emulator never runs). */
+    var autoShotNow: ((Boolean, Boolean) -> Unit)? = null
+
     fun requestAutoShot(miss: Boolean = false, coached: Boolean = false) {
+        autoShotNow?.let { it(miss, coached); return }
         autoShotMiss = miss
         autoShotCoached = coached
         autoShotVersion++

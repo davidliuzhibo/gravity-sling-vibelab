@@ -1,0 +1,74 @@
+GravitySling 代码与运行审计
+日期：2026-10-17
+工程：D:\Private\Trae\Projects\21.PicoVR_Games\Projects\Claude\GravitySling
+
+结论
+本项目是“空间弹弓 + 引力轨道解谜”：拉动探测器确定发射方向和力度，借助天体引力、可摆放引力球、加速环与虫洞，收集星星并把包裹送到空间站。内容为 3 章 15 关、每关 3 星、15 张解锁图鉴。
+源文件本次已补齐，能够在 Windows 构建。原始包不是经过此次修复的包。
+原生场景自动化结果：两次运行累计 15/15 关三星通过；第二段完整返回 OK (1 test)，含最终结算、持久化、切关和重试检查。最终两段应用 PID 的日志未发现 FATAL EXCEPTION 或 Fatal signal。
+但最终额外进行的普通冷启动未通过稳定性检查：PID 8284 在 23:15:51 记录 handleAppException type=ANR，系统出现 Application Not Responding 窗口，直到 23:18:00.853 才记录第一关 SCENE_READY。此问题未修复，当前包不是已完成稳定性验收的交付版本。仪器测试通过与普通启动 ANR 必须分别报告。
+这份结果不等于真机体验验收：本次后半段遵照用户要求，只使用无窗口、无音频的后台模拟器，没有进行人工手势、修复后视觉或声音听感验证。
+
+发现并处理的问题
+1. 严重：重复进入/切换关卡时抛出 closed MeshResource 异常，进程崩溃。
+   原因：Assets 保存 Kotlin 引用，但关卡实体销毁后共享原生网格/材质仍被释放。
+   处理：共享 Resource 使用 toGlobal 保留，由场景退出时统一 close；循环低鸣音源也明确保留并释放。故障原始证据在 instrumentation.log；后续切关测试使用修复后的 ARM64 包。
+2. 中等：取消手势原先与松手发射走同一路径，跟踪丢失可能造成误发射。
+   处理：独立 dragCancel，探测器回到发射架，不增加尝试次数；引力球回到最近合法位置。
+3. 中等：关卡变更与 Compose 重建之间存在旧场景处理新 session 的空档，重试还有拖拽/提示/庆祝状态残留。
+   处理：输入和帧回调校验当前 level；重置清理拖拽、事件、提示、示范球和粒子；退出取消订阅和待执行回调。选关与“下一单”也增加解锁/成功条件校验。
+4. 中等：声音默认自动播放，提示音偏尖、循环声音偏大。
+   处理：启动仅 prepare，不 play；默认关闭声音，调度台主动开启。降低音高、高次谐波、波形峰值和运行增益；空间音源采用固定距离衰减。所有 9 个 WAV 重新生成为 44.1 kHz。
+   收星提示音 2 kHz 以上能量占比由约 58.73% 降到 0.34%；中继提示由 8.31% 降到 0.02%。这只证明文件频谱的变化，不证明主观听感通过。
+   原始 hum/ambient 文件几乎没有 2 kHz 以上能量，持续启动鸣叫的根因尚未通过受控录音复现，不能直接归因于收星音效。
+5. 体验问题：原始截图中，启动时控制台和图鉴重叠，文字背景对比不足，图鉴 15 个按钮横排容易裁切。
+   处理：图鉴改为按需打开、窗口复用 tag、正文使用深底浅字（先关闭系统玻璃底）、图鉴选择行可横向滚动。
+   这些修改已编译，修复后的视觉效果尚未人工复核。baseline-window.png 是修复前截图，不是修复后的交付效果图。
+6. 环境问题：local.properties 指向不存在的 Linux SDK 路径，修为本机 Android SDK 路径，并修复 Lint 的路径转义错误。
+   PICO 6.1 模拟器的 Spatial 系统库为 ARM64；x86_64 单 ABI 实验因 ELF 架构不匹配失败，已完全回退。交付包保持 ARM64。
+
+已完成的 JVM 与构建检查
+- 原始 20 个测试入口通过；新增 6 个回归入口，报告合计 26 个、0 失败。其内 2 个为 lab 诊断入口，默认不执行诊断逻辑，不能算作 2 项额外断言覆盖。
+- 新增 4,500 次固定随机种子的飞行检查：数值有限、飞行能结束、星数范围正常。
+- 15 关 × 30/60/72/90/120 Hz，共 75 组实时会话与预测结果一致性检查：状态、星数、模拟时间一致，事件不重复。
+- 覆盖过短拉弓、重复释放、飞行中禁止摆球、卡顿步进上限、重置不继续旧飞行、失败不解锁、零星通关和损坏存档输入。
+- 原有测试覆盖 15 关标准解、必要机制、合法摆球和每关 200 次扰动的容错下限；不是实际人的通关成功率测量。
+- ARM64 app APK 与 androidTest APK 构建通过。Android Lint 0 错误；仍有 26 条警告和 1 条提示，主要是模板/版本/样式建议，并非“所有静态检查零告警”。
+- 证据：baseline-build.log、lifecycle-build.log、final-arm64-build.log、resume-build.log、lint-final.log，以及 app/app/build/reports/ 下的测试与 Lint 报告。
+
+原生场景测试方法与边界
+使用 debug 专用 RuntimeProbe，在仪器测试中调用真实 Playfield 的 dragStart/drag/dragCancel/dragEnd，随后等待真实 SceneEvents.Update 自然推进，不在测试中直接调用物理 tick 冒充模拟器运行。
+逐关检查取消不发射、不增加次数、合法摆球、标准航线送达三星、进度更新及静音状态；最终检查 45 星、15 张图鉴解锁、全通关状态、持久化、拖拽中切关、重复重试和短时稳定性。
+测试不会证明真实手势目标命中、px 到米换算的手感、按钮点击可达性、窗口视觉、图鉴模型显示、音效听感或真机帧率。
+首段 ARM64 测试已通过 1-1 至 2-4；2-5 在原 60 秒上限超时。延长等待后 2-5 实际约 66 秒通过，说明这次超时是等待上限不足。
+第二段用 startAt=2-5 恢复。为解锁后续关卡，测试在内存中填入前 9 关成绩；这些关卡的证据来自首段真实 PASS 日志，不能算作第二段重新测试。不能宣称完成了单次不中断的 15 关连续人工试玩。
+最终通过关卡：1-1、1-2、1-3、1-4、1-5、2-1、2-2、2-3、2-4、2-5、3-1、3-2、3-3、3-4、3-5，均为 3 星且 silent=true。
+第二段返回 OK (1 test)，用时 365.096 秒；45 星持久化、15 张图鉴解锁、全通关结算、拖拽中切关、12 次重试命令及 15 秒短时稳定检查均执行通过。原生测试日志 native-pass.log、native-pid-5697.log、native-pid-7100.log、instrumentation-final.log、instrumentation-resume.log 保留于 .audit/2026-10-17/。
+
+本次中间失败记录
+- 首次原生测试确实复现共享资源关闭崩溃，已修复。
+- 曾在编译并行期间发生 SDK 初始化阶段 ANR；后续将编译与设备测试分开。该次未进入关卡测试，不能当作玩法失败，也不能据此宣称启动性能已认证。
+- x86_64 实验因 ARM64 Spatial 系统库不兼容失败，已回退；不交付该实验包。
+- 无窗口模式截图命令超时，因此没有伪造修复后截图。原始错误日志均保留。
+
+最终冷启动的未解决问题
+恢复原始空存档后，使用 pico-cli app launch 正常启动（未使用仪器测试），出现 ANR。应用日志中的 ANR 早于 SpatialPackLoader loaded success，约两分钟后才记录第一关 SCENE_READY。后续进入场景并不能抹去已经发生的启动 ANR；这只能定位到启动阶段，不能仅凭这些日志确认究竟是 SDK、ARM 转译、模拟器负载还是其他初始化瓶颈。
+本次未完成正式性能追踪。没有使用未文档化接口，也没有把 SDK 启动强行改到工作线程来掩盖 ANR。后续应单独对普通冷启动进行受控复现和主线程/运行时性能分析，再做真机对照。
+证据：cold-start-8284.log、cold-start-activities.txt。dumpsys activity lastanr 返回“no ANR”，但应用的 handleAppException type=ANR 和系统当前 ANR 窗口均为正面证据，不能据前者宣称没有发生。
+
+交付与复现
+修正版：apk/GravitySling-audited-20261017-debug.apk
+包名：com.vrgames.gravitysling；versionCode=1，versionName=1.0；ARM64 debug 包，非商店发布签名。
+SHA-256：4c52254fb656d4de7103fd4dd0ecd4e76eaeea14afcc7888838c5c0f0db76896
+原始 apk/GravitySling-debug.apk 保留不动。原代码备份 .audit/2026-10-17/source-before.zip。
+Windows 构建：./tools/validate-windows.ps1 -WithLint
+在已启动的指定测试设备上安装 app 与 androidTest APK 后，完整仪器测试入口为：
+  adb -s emulator-5554 shell am instrument -w -r -e class com.vrgames.gravitysling.RuntimeAuditTest com.vrgames.gravitysling.test/androidx.test.runner.AndroidJUnitRunner
+必须先确认目标是测试用 PICO 模拟器；不要操作 emulator-5556（另一个项目）。不要在用户使用屏幕时启动可见模拟器或启用音频。
+现有 PICO 模拟器无窗口启动需要经 pico-cli 指定现成 qemu 路径，并配置其 lib64/Qt DLL 搜索路径；本次启动参数包含 -no-window -no-audio，未替换/重装模拟器。
+安装本地 debug 包与原包签名不同。本次在替换前已备份存档。测试 finally 恢复后检查偏好 XML 为空，再停止应用，移除仅由测试创建的空 XML，按原始备份恢复；shared_prefs 目录与原始状态一致（0 个存档文件），45 星测试成绩未留给用户。证据：prefs-restored.json。
+
+仍需人工验收
+详见 docs/PLAYTEST.txt：真实手捏/凝视/手柄、追踪丢失、窗口文字与图鉴、坐姿站姿高度、开关声音后的听感、真机持续 15–20 分钟稳定性与帧率。
+当前硬件后台运行明显慢，不能用自动化送达成功来承诺“运行流畅”或“已达到提交官方的体验标准”。
+收尾：已停止游戏，并仅关闭本次测试使用的 Pico_Emulator_6_1 / emulator-5554（进程 21684）；CLI 返回 targetMatched=true、stopped=true。本次测试不再后台占用该模拟器的资源，见 emulator-stop.json。

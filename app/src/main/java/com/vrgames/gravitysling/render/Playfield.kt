@@ -55,6 +55,10 @@ class Playfield(private val assets: Assets) {
     /** Gold marker where the aim assist wants the probe pulled to. */
     private val assistMark = model(assets.unitSphere, assets.assistMaterial).apply { enabled = false; setScale(0.03f) }
     private val trail = DotLine("trail", 240, assets.dotMesh, assets.trailMaterial, 0.7f)
+    /** v2.3: a belt of rocks far round the playfield, slowly turning (backdrop only). */
+    // A child of [root], so it sits at the playfield's own origin (2.3.0 added the room offset a second time).
+    private val belt = Entity()
+    private var beltBuilt = false
     private val hint = DotLine("hint", 320, assets.dotMesh, assets.hintMaterial, 0.8f)
     /** During a flight: where the probe would go if it burned now. */
     private val burnLine = DotLine("burn", 60, assets.dotMesh, assets.burnMaterial, 0.8f)
@@ -213,6 +217,7 @@ class Playfield(private val assets: Assets) {
         // The probe stays on the root and stays enabled: a grab target that is disabled or moved to
         // another parent may stop receiving pinches. It is hidden through its visual instead.
         root.addChild(probe)
+        root.addChild(belt)
         root.addChild(aim.entity)
         root.addChild(trail.entity)
         root.addChild(hint.entity)
@@ -283,8 +288,13 @@ class Playfield(private val assets: Assets) {
     }
 
     /** Height of the playfield origin above the floor, plus the player's offset. */
-    fun placeInRoom(heightOffset: Float) {
-        root.setPos(Vector3(0f, BASE_HEIGHT + heightOffset, BASE_Z))
+    /**
+     * v2.3.1 (device 2026-11-19: 30–40 cm too low on a first install, right after a reinstall): the playfield's height
+     * comes from the measured eye height ([eyeY], see core.EyeHeight), [BELOW_EYE] under the eyes. It used to be a fixed
+     * [BASE_HEIGHT] over the room origin, which is only right while the origin is the floor.
+     */
+    fun placeInRoom(heightOffset: Float, eyeY: Float = BASE_HEIGHT + BELOW_EYE) {
+        root.setPos(Vector3(0f, eyeY - BELOW_EYE + heightOffset, BASE_Z))
         root.transform().eulerAngles = EulerAngles(0f, 0f, 0f)
         root.setScale(1f)
     }
@@ -786,11 +796,27 @@ class Playfield(private val assets: Assets) {
 
     private fun animate(dt: Double) {
         val spin = (time * 8.0 % 360.0).toFloat()
+        assets.driftClouds(time)
+        assets.breatheWells(time)
+        // Built once the rock shapes have loaded (spheres would stand in otherwise).
+        if (!beltBuilt && assets.rockTemplates.isNotEmpty()) { belt.addChild(assets.newBelt()); beltBuilt = true }
+        belt.transform().eulerAngles = EulerAngles(8f, (time * 1.5 % 360.0).toFloat(), 3f)
         for (i in bodySpecs.indices) {
             val k = bodySpecs[i].kind
             if (k == BodyKind.PLANET || k == BodyKind.MOON) {
                 bodyEntities[i].transform().eulerAngles = EulerAngles(0f, spin * if (k == BodyKind.PLANET) 1f else 0.4f, 0f)
             }
+        }
+        // The gravity rings stay facing the player (turned back by their body's spin).
+        assets.faceWells { ring ->
+            var cur: Entity? = ring
+            var found: Float? = null
+            while (cur != null && found == null) {
+                val i = bodyEntities.indexOf(cur)
+                if (i >= 0) found = when (bodySpecs[i].kind) { BodyKind.PLANET -> spin; BodyKind.MOON -> spin * 0.4f; else -> 0f }
+                cur = cur.getParent()
+            }
+            found
         }
         val starSpin = (time * 90.0 % 360.0).toFloat()
         val bob = (sin(time * 2.0) * 0.004).toFloat()
@@ -1012,6 +1038,8 @@ class Playfield(private val assets: Assets) {
     companion object {
         /** Playfield origin: about chest height, ~1 m in front of where the player stands. */
         const val BASE_HEIGHT = 1.15f
+        /** The playfield's centre this far under the eyes: 1.15 m for a seated eye at 1.25 m, as tuned on the device. */
+        const val BELOW_EYE = 0.10f
         const val BASE_Z = -1.0f
         const val LAUNCHER_RADIUS = 0.095
         const val AUTO_RETRY_SECONDS = 1.4

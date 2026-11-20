@@ -209,11 +209,74 @@ class Assets {
         e.getChildren().forEach(::shareResources)
     }
 
+    // ---- v2.3 (PICO 1117: 「整体场景的美术资源比较粗糙」) --------------------------------------------------------------
+    /** Earth's clouds: a white layer with the cloud map as its alpha, a little above the ground, drifting. */
+    private val cloudMat by lazy {
+        com.pico.spatial.core.ecs.resource.UnlitMaterial.create(BlendingMode.TRANSPARENT).apply {
+            setBaseColorTexture(texture("textures/earth_clouds.png"))
+            setBaseColor(color(1f, 1f, 1f, 0.92f))
+            setCullingMode(MaterialCullingMode.BACK)
+        }.shared()
+    }
+    /** Every cloud layer made, turned a little faster than its planet by [driftClouds]. */
+    private val cloudLayers = ArrayList<java.lang.ref.WeakReference<Entity>>()
+
+    fun driftClouds(time: Double) {
+        val yaw = (time * 3.0 % 360.0).toFloat()
+        // v2.3.1 (device 2026-11-19: a crash right after clearing a level): a level or the star map rebuilt destroys the old
+        // planets, but a weak reference still hands back the destroyed entity until it is collected, and turning it then
+        // crashed. Only valid entities are touched; dead ones leave the list.
+        cloudLayers.removeAll { val e = it.get(); e == null || !e.alive() }
+        for (w in cloudLayers) { val e = w.get() ?: continue; runCatching { e.transform().eulerAngles = com.pico.spatial.core.math.EulerAngles(0f, yaw, 0f) } }
+    }
+
+    /**
+     * The pull of each body made visible: a faint ring round it at three times its radius, breathing slowly
+     * (one material for all, see [breatheWells]).
+     */
+    private val wellMat by lazy { unlit(color(0.55f, 0.8f, 1f, 0.0f), BlendingMode.TRANSPARENT).apply { setCullingMode(MaterialCullingMode.NONE) }.shared() }
+    private val wellMesh by lazy { annulus(0.97f, 1f, 96).shared() }
+    private val wells = ArrayList<java.lang.ref.WeakReference<Entity>>()
+
+    /**
+     * The rings face the player whatever their body's turn: each is turned back by its body's spin ([spinOf] the
+     * body's yaw in degrees, by the ring's entity), as the body spins about y.
+     */
+    fun faceWells(spinOf: (Entity) -> Float?) {
+        wells.removeAll { val e = it.get(); e == null || !e.alive() }
+        for (w in wells) {
+            val e = w.get() ?: continue
+            if (!e.alive()) continue
+            val s = runCatching { spinOf(e) }.getOrNull() ?: continue
+            runCatching { e.transform().eulerAngles = com.pico.spatial.core.math.EulerAngles(90f, -s, 0f) }
+        }
+    }
+
+    fun breatheWells(time: Double) { wellMat.setBaseColor(color(0.55f, 0.8f, 1f, (0.1 + 0.06 * kotlin.math.sin(time * 1.6)).toFloat())) }
+
+    /** A belt of small rocks far round the playfield, slowly turning (the scene's backdrop, not in play). */
+    fun newBelt(): Entity = Entity().apply {
+        val rnd = java.util.Random(5)
+        for (k in 0 until 64) {
+            val a = 2 * Math.PI * k / 64 + rnd.nextDouble() * 0.08
+            val r = 2.3 + rnd.nextDouble() * 0.5
+            val s = (0.012 + rnd.nextDouble() * 0.035).toFloat()
+            val rock = rockTemplates.getOrNull(k % rockTemplates.size.coerceAtLeast(1))?.clone(Entity.CloneOptions(true, true))?.also { setMaterials(it, rockMat) }
+                ?: model(unitSphere, rockMat)
+            rock.setScale(s)
+            rock.setPos(Vector3((r * kotlin.math.cos(a)).toFloat(), (rnd.nextGaussian() * 0.06).toFloat(), (r * kotlin.math.sin(a)).toFloat()))
+            rock.transform().eulerAngles = com.pico.spatial.core.math.EulerAngles((rnd.nextDouble() * 360).toFloat(), (rnd.nextDouble() * 360).toFloat(), 0f)
+            addChild(rock)
+        }
+    }
+
     fun newBodyVisual(b: BodySpec): Entity {
         val r = b.radius.toFloat()
         return when (b.kind) {
             BodyKind.PLANET, BodyKind.STAR -> Entity().apply {
                 addChild(bodySphere(b.look).apply { setScale(r) })
+                if (b.look == "earth") addChild(model(unitSphere, cloudMat).apply { setScale(r * 1.012f); cloudLayers += java.lang.ref.WeakReference(this) })
+                addChild(model(wellMesh, wellMat).apply { setScale(r * 3f); transform().eulerAngles = com.pico.spatial.core.math.EulerAngles(90f, 0f, 0f); wells += java.lang.ref.WeakReference(this) })
                 val rims = when (b.look) {
                     "earth" -> earthRims
                     "mars" -> marsRims
@@ -222,7 +285,10 @@ class Assets {
                 }
                 rims.forEachIndexed { i, m -> addChild(model(unitSphere, m).apply { setScale(r * (1.025f + 0.04f * i)) }) }
             }
-            BodyKind.MOON -> bodySphere(b.look).apply { setScale(r) }
+            BodyKind.MOON -> Entity().apply {
+                addChild(bodySphere(b.look).apply { setScale(r) })
+                addChild(model(wellMesh, wellMat).apply { setScale(r * 3f); transform().eulerAngles = com.pico.spatial.core.math.EulerAngles(90f, 0f, 0f); wells += java.lang.ref.WeakReference(this) })
+            }
             BodyKind.GRAVITY_BALL -> Entity().apply {
                 addChild(model(unitSphere, ballCore).apply { setScale(r * 0.7f) })
                 addChild(model(unitSphere, ballHalo).apply { setScale(r * 1.6f) })
@@ -332,7 +398,7 @@ class Assets {
     }
 
     private val ringMaterial by lazy {
-        pbr(color(1f, 1f, 1f), roughness = 0.8f, blending = BlendingMode.TRANSPARENT).apply {
+        pbr(color(1f, 1f, 1f), roughness = 0.8f, emissive = color(0.28f, 0.25f, 0.2f), blending = BlendingMode.TRANSPARENT).apply {
             setBaseColorTexture(texture("textures/saturn_ring.png"))
             setCullingMode(MaterialCullingMode.NONE)
         }.shared()
@@ -493,3 +559,6 @@ class Assets {
         }
     }
 }
+
+/** False once the entity has been destroyed (its transform is gone); a weak reference can still hand such an entity back. */
+fun Entity.alive(): Boolean = runCatching { components[com.pico.spatial.core.ecs.TransformComponent::class.java] != null }.getOrDefault(false)

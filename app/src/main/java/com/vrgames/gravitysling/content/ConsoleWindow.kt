@@ -23,6 +23,7 @@ import com.pico.spatial.ui.design.Button
 import com.pico.spatial.ui.design.Text
 import com.pico.spatial.ui.platform.containers.LocalSpatialNavigator
 import com.vrgames.gravitysling.CODEX_ID
+import com.vrgames.gravitysling.CONSOLE_ID
 import com.vrgames.gravitysling.core.Codex
 import com.vrgames.gravitysling.core.FlightStatus
 import com.vrgames.gravitysling.core.Levels
@@ -40,6 +41,7 @@ const val DISCLAIMER = "本作品为虚构，与任何航天机构无关。美�
 /** Mission control: title card first, then level select, briefing, flight status and assists. */
 @Composable
 fun ConsoleWindow() {
+    com.vrgames.gravitysling.platform.AppExit.CloseWithStage(CONSOLE_ID)
     if (Game.showTitle) TitleCard() else MissionControl()
 }
 

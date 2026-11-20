@@ -54,7 +54,11 @@ object AutoPilot {
     fun register(context: Context) {
         if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
         val receiver = object : BroadcastReceiver() {
-            override fun onReceive(c: Context, i: Intent) = command(i.getStringExtra("cmd") ?: "", i.getStringExtra("id"))
+            override fun onReceive(c: Context, i: Intent) {
+                // 2026-11-19: the menu's 退出, for the emulator test (every window of the app should go).
+                if (i.getStringExtra("cmd") == "quit") { android.util.Log.i(TAG, "cmd quit"); com.vrgames.gravitysling.platform.AppExit.finishAll(c) }
+                else command(i.getStringExtra("cmd") ?: "", i.getStringExtra("id"))
+            }
         }
         ContextCompat.registerReceiver(context.applicationContext, receiver, IntentFilter(ACTION), ContextCompat.RECEIVER_EXPORTED)
         Log.i(TAG, "ready")
@@ -74,6 +78,8 @@ object AutoPilot {
             "stop" -> stop()
             "mute" -> mute(id.orEmpty())
             "view" -> Game.debugView = id?.takeIf { it != "reset" }
+            // Measure the eyes again; --es id 2.5 makes the head read all zeros for 2.5 s first.
+            "replace" -> { Game.debugZeroHeadS = id?.toDoubleOrNull() ?: 0.0; Game.placeRequest++ }
             "card" -> { Game.selectedCard = id; Game.narrate(id) }
             "showcase" -> Game.showcase = id?.takeIf { it != "off" }
             "slow" -> Game.timeScale = id?.toDoubleOrNull() ?: 1.0

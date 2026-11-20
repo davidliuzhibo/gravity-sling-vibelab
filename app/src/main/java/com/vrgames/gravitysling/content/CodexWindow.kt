@@ -1,5 +1,6 @@
 package com.vrgames.gravitysling.content
 
+import com.vrgames.gravitysling.CODEX_ID
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -79,6 +80,7 @@ private val ChipOn = Color(0x556FE3FF)
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CodexWindow() {
+    com.vrgames.gravitysling.platform.AppExit.CloseWithStage(CODEX_ID)
     @Suppress("UNUSED_VARIABLE") val pv = Game.progressVersion
     val unlocked = Game.progress().unlockedCards().toSet()
     val selected = Game.selectedCard?.takeIf { it in unlocked } ?: unlocked.firstOrNull()
