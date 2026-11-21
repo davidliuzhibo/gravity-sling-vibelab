@@ -1,6 +1,6 @@
 # 引力弹弓
 
-PICO Vibe Lab 原作品版本更新。版本 2.3.1 / versionCode 14。Android 包名 `com.vrgames.gravitysling`。
+PICO Vibe Lab 原作品版本更新。版本 2.3.3 / versionCode 16。Android 包名 `com.vrgames.gravitysling`。
 
 本版变更见[更新说明](更新说明.md)。正常构建使用仓库内已落盘的代码和素材，不需要模型生成服务。
 

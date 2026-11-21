@@ -188,6 +188,7 @@ class Assets {
         return template?.clone(Entity.CloneOptions(true, true))?.also { setMaterials(it, m) } ?: model(unitSphere, m)
     }
 
+
     /** Irregular asteroid shapes (tools/make_rocks.py); spheres stand in until they load. */
     var rockTemplates: List<Entity> = emptyList()
         set(v) { field = v.onEach(::shareResources) }

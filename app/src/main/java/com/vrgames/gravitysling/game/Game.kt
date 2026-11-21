@@ -124,6 +124,8 @@ object Game {
 
     /** Debug only (AutoPilot): playfield pose override "x,y,z,yaw,scale" for screenshots, and slow motion. */
     var debugView by mutableStateOf<String?>(null)
+    /** Debug (`showyaw`): the showcase model held at this turn instead of spinning (null: spinning). */
+    @Volatile var debugShowcaseYaw: Float? = null
     @Volatile var timeScale = 1.0
     var assetsReady by mutableStateOf(false)
 

@@ -1,0 +1,20 @@
+[out:json][timeout:180];
+(
+  way["natural"="coastline"](20.3,116.4,21.0,117.1);
+  way["natural"="reef"](20.3,116.4,21.0,117.1);
+  way["natural"="coastline"](15.6,111.0,17.3,113.0);
+  way["natural"="reef"](15.6,111.0,17.3,113.0);
+  relation["natural"="reef"](15.6,111.0,17.3,113.0);
+  way["natural"="coastline"](14.9,117.5,15.4,118.0);
+  way["natural"="reef"](14.9,117.5,15.4,118.0);
+  way["natural"="reef"](15.2,113.5,16.5,115.2);
+  way["natural"="coastline"](6.0,111.0,11.6,116.8);
+  way["natural"="reef"](6.0,111.0,11.6,116.8);
+  relation["natural"="reef"](6.0,111.0,11.6,116.8);
+  way["natural"="reef"](3.7,111.4,6.0,113.6);
+  node["place"~"^(island|islet)$"](20.3,116.4,21.0,117.1);
+  node["place"~"^(island|islet)$"](15.6,111.0,17.3,113.0);
+  node["place"~"^(island|islet)$"](14.9,117.5,15.4,118.0);
+  node["place"~"^(island|islet)$"](6.0,111.0,11.6,116.8);
+);
+out geom;

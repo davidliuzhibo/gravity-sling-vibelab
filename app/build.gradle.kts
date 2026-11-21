@@ -14,8 +14,8 @@ android {
         applicationId = "com.vrgames.gravitysling"
         minSdk = 35
         targetSdk = 35
-        versionCode = 14
-        versionName = "2.3.1"
+        versionCode = 16
+        versionName = "2.3.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters.add("arm64-v8a") }

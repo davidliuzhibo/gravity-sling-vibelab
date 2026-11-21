@@ -412,7 +412,7 @@ fun GameStage() {
                     }
                 }
                 showcase[0]?.components?.get(TransformComponent::class.java)?.let { t ->
-                    showcaseYaw[0] = (showcaseYaw[0] + e.deltaTime * 25f) % 360f
+                    showcaseYaw[0] = Game.debugShowcaseYaw ?: ((showcaseYaw[0] + e.deltaTime * 25f) % 360f)
                     t.eulerAngles = EulerAngles(10f, showcaseYaw[0], 0f)
                 }
                 val (changed, phase) = synchronized(Game.lock) {

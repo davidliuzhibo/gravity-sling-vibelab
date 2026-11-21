@@ -82,6 +82,7 @@ object AutoPilot {
             "replace" -> { Game.debugZeroHeadS = id?.toDoubleOrNull() ?: 0.0; Game.placeRequest++ }
             "card" -> { Game.selectedCard = id; Game.narrate(id) }
             "showcase" -> Game.showcase = id?.takeIf { it != "off" }
+            "showyaw" -> { Game.debugShowcaseYaw = id?.toFloatOrNull(); Log.i(TAG, "showcase yaw ${Game.debugShowcaseYaw ?: "spinning"}") }
             "slow" -> Game.timeScale = id?.toDoubleOrNull() ?: 1.0
             "ibl" -> id?.toFloatOrNull()?.let { Game.lighting?.exponent = it }
             "sun" -> sun(id.orEmpty())
